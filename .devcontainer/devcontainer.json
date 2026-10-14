@@ -1,0 +1,36 @@
+{
+  "name": "handshake",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.1": {
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "remoteUser": "node",
+  "containerEnv": {
+    "MIDNIGHT_LOCAL_DEVNET_HOST": "host.docker.internal"
+  },
+  "mounts": [
+    "source=${devcontainerId}-next-node-modules,target=${containerWorkspaceFolder}/node_modules,type=volume,volume-nocopy",
+    "source=${devcontainerId}-midnight-node-modules,target=${containerWorkspaceFolder}/midnight-contract/node_modules,type=volume,volume-nocopy"
+  ],
+  "postCreateCommand": "sudo chown -R node:node node_modules midnight-contract/node_modules && npm install && npm --prefix midnight-contract install",
+  "forwardPorts": [3000, 6300, 8088, 9944],
+  "portsAttributes": {
+    "3000": { "label": "Next.js" },
+    "6300": { "label": "Midnight proof server" },
+    "8088": { "label": "Midnight indexer" },
+    "9944": { "label": "Midnight node" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "bradlc.vscode-tailwindcss"
+      ]
+    }
+  }
+}
