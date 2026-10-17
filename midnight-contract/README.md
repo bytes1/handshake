@@ -79,11 +79,13 @@ contract cannot issue a fiat refund. DKIM/RSA verification and provider
 receipt parsing remain off-chain responsibilities; do not describe this as
 trustless DKIM verification or assume the signature proves that the attester
 parsed a real provider receipt correctly.
-The included email verifier supports only a synthetic, fixed-template receipt
+The legacy synthetic email endpoint supports only a fixed-template receipt
 signed with a locally pinned RSA key. Its sender uses
-`paypal.handshake-demo.test`; it is not a PayPal email or a general-purpose,
-DNS-backed DKIM verifier. The fixture exists to exercise the cryptographic
-attestation path end to end. Do not use it as evidence of a real payment.
+`paypal.handshake-demo.test`; it is not a PayPal email. The Gmail demo-receipt
+endpoint separately verifies the uploaded raw email file with DNS-backed DKIM, checks
+the configured sender and signed receipt fields, and issues the same contract
+attestation. This remains a trusted backend attestation, not a trustless DKIM
+proof or evidence that a real payment happened.
 
 The token contract mints **Handshake test tUSDC**, a custom, capped Midnight
 unshielded token with six decimal places. It is not Circle USDC and has no

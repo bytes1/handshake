@@ -28,7 +28,6 @@
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.16.0",
-    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
     "@midnight-ntwrk/midnight-js-contracts": "4.1.1",
     "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1",
@@ -38,8 +37,12 @@
     "@midnight-ntwrk/midnight-js-protocol": "4.1.1",
     "@midnight-ntwrk/midnight-js-types": "4.1.1",
     "@midnight-ntwrk/midnight-js-utils": "4.1.1",
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
     "@midnight-ntwrk/wallet-sdk": "1.2.0",
     "@scure/bip39": "2.2.0",
+    "@types/mailparser": "^3.9.0",
+    "mailauth": "^7.3.0",
+    "mailparser": "^3.9.40",
     "rxjs": "^7.8.2",
     "ws": "^8.21.1"
   },
@@ -52,5 +55,10 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "keywords": ["midnight", "blockchain", "zero-knowledge", "privacy"]
+  "keywords": [
+    "midnight",
+    "blockchain",
+    "zero-knowledge",
+    "privacy"
+  ]
 }

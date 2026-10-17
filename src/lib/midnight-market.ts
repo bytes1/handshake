@@ -1,9 +1,9 @@
 import { bech32m } from "@scure/base";
+import { CompiledContract } from "@midnight-ntwrk/compact-js";
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js-contracts";
 import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
-import { CompiledContract } from "@midnight-ntwrk/midnight-js-protocol/compact-js";
 import { fromHex, toHex } from "@midnight-ntwrk/midnight-js-protocol/compact-runtime";
 import { Binding, decodeContractAddress, Proof, rawTokenType, SignatureEnabled, Transaction } from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import { ZKConfigProvider } from "@midnight-ntwrk/midnight-js-types";
@@ -73,6 +73,8 @@ type ActiveIntent = {
   tradeReference: string;
   recipientEmail: string;
   buyerAddress?: string;
+  receiptToken?: string;
+  resendEmailId?: string;
 };
 
 const INTENT_STORAGE_KEY = "handshake:market-intent:v1";
@@ -216,6 +218,12 @@ function saveActiveIntent(intent: ActiveIntent): void {
   try { localStorage.setItem(key, serialized); } catch { /* Session storage still supports this tab. */ }
 }
 
+export function updateSavedActiveIntent(intent: ActiveIntent, update: Partial<Pick<ActiveIntent, "recipientEmail" | "receiptToken" | "resendEmailId">>): ActiveIntent {
+  const next = { ...intent, ...update };
+  saveActiveIntent(next);
+  return next;
+}
+
 export function clearSavedActiveIntent(buyerAddress?: string): void {
   const key = buyerAddress ? `${INTENT_STORAGE_KEY}:${hex(userAddressBytes(buyerAddress).bytes)}` : INTENT_STORAGE_KEY;
   sessionStorage.removeItem(key);
@@ -265,11 +273,10 @@ function userAddressBytes(bech32Address: string): { bytes: Uint8Array } {
   return { bytes: decoded.bytes };
 }
 
-export async function reserveMarketIntent(wallet: ConnectedMidnightWallet, input: string, buyerAddress: string, recipientEmail: string) {
+export async function reserveMarketIntent(wallet: ConnectedMidnightWallet, input: string, buyerAddress: string) {
   const market = await readMarket(wallet, buyerAddress);
   if (market.buyerIntentActive) throw new Error("This wallet already has an active reservation for this offer. Continue or cancel it first.");
   const paymentMinor = paymentMinorFromDollars(input);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) throw new Error("Enter the email address used for the payment receipt.");
   const amount = quoteTokenAmount(paymentMinor, BigInt(market.exchangeRateBps));
   if (amount < BigInt(market.minimumFill) || amount > BigInt(market.maximumFill) || amount > BigInt(market.availableLiquidity)) {
     throw new Error("That amount is outside this offer’s fill range or available liquidity.");
@@ -281,7 +288,7 @@ export async function reserveMarketIntent(wallet: ConnectedMidnightWallet, input
     paymentMinor: paymentMinor.toString(),
     amount: amount.toString(),
     tradeReference: `HS-${randomHex(8).toUpperCase()}`,
-    recipientEmail: recipientEmail.trim().toLowerCase(),
+    recipientEmail: "",
     buyerAddress,
   };
   saveActiveIntent(intent);
@@ -329,7 +336,9 @@ type AttestationResponse = {
   error?: string;
 };
 
-export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet, intent: ActiveIntent) {
+export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet, intent: ActiveIntent, rawEmailBase64: string) {
+  if (!rawEmailBase64) throw new Error("Upload the original Gmail .eml file to verify this receipt.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(intent.recipientEmail)) throw new Error("Send the demo receipt to a valid email address before uploading its .eml file.");
   const { publicDataProvider, contract } = await contractFor(wallet);
   if (!intent.buyerAddress) throw new Error("This saved reservation is missing its buyer wallet address.");
   const recipientKey = userAddressBytes(intent.buyerAddress).bytes;
@@ -362,27 +371,30 @@ export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet
     const state = observed ? ` Active reservations on offer: ${observed.activeIntentCount.toString()}.` : " The indexer returned no marketplace state.";
     throw new Error(`The indexer has not confirmed this reservation.${tx}${state} Keep this tab open and check that Lace and the marketplace use the same ${NETWORK_LABEL} network.`);
   }
+  const attesterUrl = process.env.NEXT_PUBLIC_ATTESTER_URL ?? "http://127.0.0.1:8787";
+  const attestationInput = {
+    buyerAddress: intent.buyerAddress,
+    contractId: MARKET_ADDRESS,
+    buyerCommitment: hex(ledger.intentCommitments.lookup(recipientKey)),
+    nullifier: intent.nullifier,
+    intentNonce: ledger.intentNonces.lookup(recipientKey).toString(),
+    tradeReference: intent.tradeReference,
+    amountMinor: intent.paymentMinor,
+    recipient: intent.recipientEmail,
+  };
   let response: Response;
   try {
-    response = await fetch(`${process.env.NEXT_PUBLIC_ATTESTER_URL ?? "http://127.0.0.1:8787"}/v1/demo/paypal/attest`, {
+    response = await fetch(`${attesterUrl}/v1/demo/resend/dkim-attest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contractId: MARKET_ADDRESS,
-        buyerCommitment: hex(ledger.intentCommitments.lookup(recipientKey)),
-        nullifier: intent.nullifier,
-        intentNonce: ledger.intentNonces.lookup(recipientKey).toString(),
-        tradeReference: intent.tradeReference,
-        amountMinor: intent.paymentMinor,
-        recipient: intent.recipientEmail,
-      }),
+      body: JSON.stringify({ ...attestationInput, rawEmailBase64 }),
     });
   } catch {
-    throw new Error("The reservation is safe, but the attester is not running. In midnight-contract, run `npm run attester:start`, then retry this step.");
+    throw new Error("The reservation is safe, but the attester could not be reached. In midnight-contract, run `npm run attester:start`, then retry.");
   }
   const attestation = await response.json() as AttestationResponse;
   if (!response.ok) throw new Error(attestation.error ?? `Attester returned HTTP ${response.status}.`);
-  if (!attestation.demoEvidence?.includes("SYNTHETIC")) throw new Error("Attester did not return synthetic demo evidence.");
+  if (!attestation.demoEvidence?.includes("GMAIL DKIM VERIFIED")) throw new Error("Attester did not return a Gmail-DKIM-verified receipt.");
   const tx = await (contract as any).callTx.submitPaymentProof(
     bytesFromHex(intent.takerSecret),
     userAddressBytes(intent.buyerAddress),

@@ -26,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { listMidnightWallets, type ConnectedMidnightWallet, type MidnightWalletApi } from "@/lib/midnight-wallet";
-import { attestAndSubmitDemoPayment, cancelMarketIntent, clearSavedActiveIntent, formatTokenAmount, isReservedIntentBuyer, loadActiveIntent, MARKET_ADDRESS, NETWORK_ID, NETWORK_LABEL, paymentMinorFromDollars, quoteTokenAmount, readBuyerDemoTokenBalance, readMarket, reserveMarketIntent, type MarketSnapshot } from "@/lib/midnight-market";
+import { attestAndSubmitDemoPayment, cancelMarketIntent, clearSavedActiveIntent, formatTokenAmount, isReservedIntentBuyer, loadActiveIntent, MARKET_ADDRESS, NETWORK_ID, NETWORK_LABEL, paymentMinorFromDollars, quoteTokenAmount, readBuyerDemoTokenBalance, readMarket, reserveMarketIntent, updateSavedActiveIntent, type MarketSnapshot } from "@/lib/midnight-market";
 import { WelcomeScreen } from "@/components/welcome-screen";
 
 type Offer = {
@@ -41,9 +41,9 @@ type Offer = {
   score: string;
 };
 
-const demoOffer: Offer = { name: "Handshake maker", initials: "H", color: "mint", rail: "PayPal", rate: 1.006, available: 0, limit: "Loading on-chain limits", time: "Preview testnet", score: "On-chain" };
+const demoOffer: Offer = { name: "Handshake maker", initials: "H", color: "mint", rail: "Gmail", rate: 1.006, available: 0, limit: "Loading on-chain limits", time: "Preview testnet", score: "On-chain" };
 
-const railMarks: Record<string, string> = { Zelle: "Z", Venmo: "v", PayPal: "P", CashApp: "$" };
+const railMarks: Record<string, string> = { Zelle: "Z", Venmo: "v", PayPal: "P", CashApp: "$", Gmail: "G" };
 
 function RailMark({ name, large = false }: { name: string; large?: boolean }) {
   return <span className={`rail-mark rail-${name.toLowerCase()}${large ? " rail-mark-large" : ""}`}>{railMarks[name] ?? name[0]}</span>;
@@ -73,7 +73,7 @@ export default function Home() {
   const [hasEnteredMarketplace, setHasEnteredMarketplace] = useState(false);
   const [mode, setMode] = useState<"Buy" | "Sell">("Buy");
   const [amount, setAmount] = useState("500");
-  const [paymentEmail, setPaymentEmail] = useState("buyer@example.test");
+  const [paymentEmail, setPaymentEmail] = useState("");
   const [showWallet, setShowWallet] = useState(false);
   const [walletAddress, setWalletAddress] = useState("");
   const [walletApi, setWalletApi] = useState<ConnectedMidnightWallet | null>(null);
@@ -87,6 +87,9 @@ export default function Home() {
   const [balanceError, setBalanceError] = useState("");
   const [marketBusy, setMarketBusy] = useState(false);
   const [activeIntent, setActiveIntent] = useState<ReturnType<typeof loadActiveIntent>>(null);
+  const [receiptEmailBase64, setReceiptEmailBase64] = useState("");
+  const [receiptFileName, setReceiptFileName] = useState("");
+  const [receiptFileBusy, setReceiptFileBusy] = useState(false);
   const [marketTxId, setMarketTxId] = useState("");
   const [showTrade, setShowTrade] = useState(false);
   const [toast, setToast] = useState("");
@@ -144,6 +147,7 @@ export default function Home() {
         (!savedIntent.intentNonce || savedIntent.intentNonce === snapshot.intentNonce);
       if (snapshot.buyerIntentActive && isReservedIntentBuyer(snapshot, walletAddress) && savedIntentMatchesBuyer) {
         setActiveIntent(savedIntent);
+        setPaymentEmail(savedIntent.recipientEmail);
         setMarketTxId(savedIntent.reservationTxId ?? "");
       } else {
         setActiveIntent(null);
@@ -213,7 +217,7 @@ export default function Home() {
       setMarketSnapshot(marketResult.value);
       setMarketError("");
     } else {
-      setMarketError(formatError(marketResult.reason));
+      setMarketError(`Marketplace refresh failed: ${formatError(marketResult.reason)}`);
     }
     if (balanceResult.status === "fulfilled") {
       setBuyerTokenBalance(balanceResult.value);
@@ -231,7 +235,7 @@ export default function Home() {
     setMarketError("");
     setMarketTxId("");
     try {
-      const result = await reserveMarketIntent(walletApi, amount, walletAddress, paymentEmail);
+      const result = await reserveMarketIntent(walletApi, amount, walletAddress);
       setActiveIntent(result.intent);
       setMarketTxId(result.txId);
       await refreshMarket();
@@ -240,20 +244,92 @@ export default function Home() {
     } finally { setMarketBusy(false); }
   };
 
-  const submitDemoProof = async () => {
+  const selectReceiptFile = async (file?: File) => {
+    setReceiptEmailBase64("");
+    setReceiptFileName("");
+    setMarketError("");
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".eml")) {
+      setMarketError("Choose the .eml file downloaded from Gmail Show original.");
+      return;
+    }
+    if (!file.size || file.size > 2 * 1024 * 1024) {
+      setMarketError("The .eml file must be no larger than 2 MiB.");
+      return;
+    }
+    setReceiptFileBusy(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      setReceiptEmailBase64(window.btoa(binary));
+      setReceiptFileName(file.name);
+    } catch (error) {
+      setMarketError(`Unable to read the .eml file: ${formatError(error)}`);
+    } finally {
+      setReceiptFileBusy(false);
+    }
+  };
+
+  const submitDemoProof = async (rawEmailBase64 = "") => {
     if (!activeIntent) return;
     if (!walletApi) { setShowTrade(false); openWalletPicker(); return; }
     setMarketBusy(true);
     setMarketError("");
     try {
-      const result = await attestAndSubmitDemoPayment(walletApi, activeIntent);
+      const result = await attestAndSubmitDemoPayment(walletApi, activeIntent, rawEmailBase64);
       setActiveIntent(null);
+      setReceiptEmailBase64("");
+      setReceiptFileName("");
       setMarketTxId(result.txId);
       notify("Proof accepted. Test tUSDC released to your Lace wallet.");
       await refreshMarket();
     } catch (error) {
       setMarketError(formatError(error));
     } finally { setMarketBusy(false); }
+  };
+
+  const sendDemoReceipt = async () => {
+    if (!activeIntent) return;
+    const recipient = paymentEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      setMarketError("Enter a valid email address for the demo receipt.");
+      return;
+    }
+    setMarketBusy(true);
+    setMarketError("");
+    try {
+      const intent = updateSavedActiveIntent(activeIntent, { recipientEmail: recipient, receiptToken: undefined, resendEmailId: undefined });
+      setActiveIntent(intent);
+      const response = await fetch("/api/demo-receipts/send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to: recipient, tradeReference: intent.tradeReference, amountMinor: intent.paymentMinor, buyerAddress: intent.buyerAddress }),
+      });
+      const result = await response.json() as { receiptToken?: string; resendEmailId?: string; sentTo?: string; error?: string };
+      if (!response.ok || !result.receiptToken) throw new Error(result.error ?? `Receipt email failed (HTTP ${response.status}).`);
+      const updated = updateSavedActiveIntent(intent, { receiptToken: result.receiptToken, resendEmailId: result.resendEmailId });
+      setActiveIntent(updated);
+      notify(`Demo receipt sent to ${result.sentTo}. No payment was made.`);
+    } catch (error) {
+      setMarketError(`Gmail receipt send failed: ${formatError(error)}`);
+    } finally { setMarketBusy(false); }
+  };
+
+  const changeReceiptEmail = (value: string) => {
+    setPaymentEmail(value);
+    setReceiptEmailBase64("");
+    setReceiptFileName("");
+    if (activeIntent && value.trim().toLowerCase() !== activeIntent.recipientEmail) {
+      const updated = updateSavedActiveIntent(activeIntent, {
+        recipientEmail: value.trim().toLowerCase(),
+        receiptToken: undefined,
+        resendEmailId: undefined,
+      });
+      setActiveIntent(updated);
+    }
   };
 
   const cancelTrade = async () => {
@@ -292,6 +368,7 @@ export default function Home() {
       return;
     }
     setActiveIntent(intent);
+    setPaymentEmail(intent.recipientEmail);
     setMarketTxId(intent.reservationTxId ?? "");
     setMarketError("");
   };
@@ -336,7 +413,7 @@ export default function Home() {
 
         <div className="content-wrap">
           <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-star">✳</span> PEER TO PEER, MADE SIMPLE</div><h1>Move money <span>your way.</span></h1><p>Buy and sell crypto directly with people, using the payment apps you already trust.</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-star">✳</span> PEER TO PEER, MADE SIMPLE</div><h1>Move money <span>your way.</span></h1><p>Review an on-chain offer, then verify a clearly marked demo email before test tokens are released.</p></div>
             <button className="how-button" onClick={() => notify("Pick an offer, pay directly, and get crypto after your payment is verified.")}><Sparkles size={15} /> How it works <ArrowUpRight size={14} /></button>
           </div>
 
@@ -351,13 +428,11 @@ export default function Home() {
               <div className="amount-label">{mode === "Buy" ? "You receive" : "You get"}</div>
               <div className="receive-panel"><div className="receive-token"><span className="token-icon">H</span><span><b>Handshake test tUSDC</b><small>Testnet token · 6 decimals</small></span><ChevronDown size={16} /></div><div className="receive-amount"><b>{displayTokenAmount.toLocaleString("en-US", { maximumFractionDigits: 6 })}</b><span>Test token · no real USDC value</span></div><div className="wallet-token-balance"><span>Connected wallet balance</span><b>{balanceLoading ? "Loading…" : buyerTokenBalance === null ? walletAddress ? "Unavailable" : "Connect Lace" : `${buyerTokenBalance} tUSDC`}</b>{balanceError && <small title={balanceError}>Balance unavailable · reconnect or refresh</small>}</div></div>
 
-              <div className="detail-row"><div className="detail-label"><span>Payment evidence</span><small>Template-signed demo email</small></div><div className="rail-selector-wrap"><RailMark name="PayPal" /><select aria-label="Payment evidence" value="PayPal" disabled><option>PayPal email demo</option></select><ChevronDown size={15} /></div></div>
-              <label className="receipt-email-row"><span>Receipt email <small>Test value for the synthetic receipt</small></span><input type="email" value={paymentEmail} onChange={(event) => setPaymentEmail(event.target.value)} aria-label="Receipt email for synthetic PayPal template" /></label>
               <div className="detail-row network-detail"><div className="detail-label"><span>Network</span><small>Deployed marketplace contract</small></div><button className="network-selector" onClick={() => notify(`Select ${NETWORK_LABEL} in Lace to connect to this marketplace.`)}><span className="network-mini"><span /></span> {NETWORK_LABEL} <ChevronDown size={15} /></button></div>
 
               <div className="quote-box"><span><LockKeyhole size={14} /> Contract: {MARKET_ADDRESS.slice(0, 8)}…</span><span className="quote-separator" /><span>On-chain rate <b>1 USD = {currentOffer.rate.toFixed(3)} tUSDC</b></span></div>
               <button className="continue-button" disabled={mode !== "Buy" || marketBusy} onClick={() => setShowTrade(true)}>{activeIntent ? "Continue reserved trade" : isConnectedBuyerOfReservedIntent ? "Recover reserved trade" : mode === "Buy" ? "Review on-chain offer" : "Sell unavailable"}<ArrowRight size={17} /></button>
-              <div className="secure-note"><ShieldCheck size={13} /> Buyer reserves, pays directly, then submits attested proof</div>
+              <div className="secure-note"><ShieldCheck size={13} /> Reserve with Lace, verify the original .eml, then submit attested proof</div>
             </section>
 
             <section className="offers-column">
@@ -373,14 +448,14 @@ export default function Home() {
                 return <button key={offer.name} className={`offer-card offer-selected${disabled ? " offer-disabled" : ""}`} onClick={() => { if (!disabled) setShowTrade(true); }}>
                   <div className="offer-person"><span className={`person-avatar ${offer.color}`}>{offer.initials}<i><BadgeCheck size={11} fill="currentColor" /></i></span><span className="person-name"><b>{offer.name}<BadgeCheck size={13} fill="currentColor" /></b><small><span className="star">✦</span> Live offer terms · verified by contract state</small></span><span className="offer-more"><MoreHorizontal size={18} /></span></div>
                   <div className="offer-data-grid"><span>Exchange rate <b>{offer.rate.toFixed(3)} <small>tUSDC / USD</small></b></span><span>Available <b>{marketSnapshot ? `${formatTokenAmount(marketSnapshot.availableLiquidity)} tUSDC` : "Connect Lace"}</b></span><span>Settlement <b><Clock3 size={12} /> Midnight Preview</b></span></div>
-                  <div className="offer-card-footer"><span className="offer-limit">USD limits {offer.limit}</span><span className="offer-pay"><RailMark name="PayPal" /> Synthetic email proof <span className="offer-divider">·</span> {displayTokenAmount.toLocaleString("en-US", { maximumFractionDigits: 6 })} tUSDC</span></div>
+                  <div className="offer-card-footer"><span className="offer-limit">USD limits {offer.limit}</span><span className="offer-pay"><RailMark name="Gmail" /> Gmail-signed email proof <span className="offer-divider">·</span> {displayTokenAmount.toLocaleString("en-US", { maximumFractionDigits: 6 })} tUSDC</span></div>
                   {marketSnapshot && marketSnapshot.activeIntentCount !== "0" && <div className="offer-unavailable">{isConnectedBuyerOfReservedIntent ? activeIntent ? "Your buyer intent is reserved. Continue it from the trade panel." : "Your wallet has a reservation. Recover it from the trade panel." : `${marketSnapshot.activeIntentCount} other buyer reservation${marketSnapshot.activeIntentCount === "1" ? "" : "s"} active. Remaining inventory is still available.`}</div>}
                   {marketSnapshot && disabled && marketSnapshot.buyerIntentActive !== true && <div className="offer-unavailable">Connect Lace or enter an amount within the live offer limits.</div>}
                 </button>;
               })}</div>
               {marketError && <p role="alert" className="checkout-error">{marketError}</p>}
               {marketTxId && <p className="chain-tx-note">Latest wallet transaction: {marketTxId}</p>}
-              <div className="trust-panel"><div className="trust-icon"><ShieldCheck size={18} /></div><div><b>Contract backed tUSDC escrow</b><p>The buyer reserves inventory in the deployed market. The configured attester verifies a synthetic DKIM email, then the buyer submits its signed proof through Lace to release test tUSDC. No live PayPal payment is made.</p><button onClick={() => notify(`Market address: ${MARKET_ADDRESS}`)}>View market address <ArrowUpRight size={12} /></button></div><div className="trust-watermark">✳</div></div>
+              <div className="trust-panel"><div className="trust-icon"><ShieldCheck size={18} /></div><div><b>Contract backed tUSDC escrow</b><p>The buyer reserves inventory, receives a clearly labeled demo email, then uploads the original message for backend Gmail DKIM verification. No external payment is made.</p><button onClick={() => notify(`Market address: ${MARKET_ADDRESS}`)}>View market address <ArrowUpRight size={12} /></button></div><div className="trust-watermark">✳</div></div>
             </section>
           </div>
 
@@ -395,23 +470,28 @@ export default function Home() {
         <div className="dialog-icon"><Banknote size={21} /></div>
         <div className="dialog-kicker">{activeIntent ? "BUYER INTENT RESERVED" : `${NETWORK_LABEL.toUpperCase()} TRADE`}</div>
         <h2 id="trade-title">{activeIntent ? "Payment proof" : isConnectedBuyerOfReservedIntent ? "Recover reserved trade" : "Reserve this offer"}</h2>
-        <p>{activeIntent ? "The tUSDC is reserved for your wallet. This demo creates a synthetic test receipt automatically; a real PayPal email cannot be uploaded yet." : isConnectedBuyerOfReservedIntent ? "This reservation belongs to your connected wallet. Restore its saved buyer intent to continue." : marketSnapshot && marketSnapshot.activeIntentCount !== "0" ? `${marketSnapshot.activeIntentCount} buyer reservation${marketSnapshot.activeIntentCount === "1" ? " is" : "s are"} active. You can reserve too while inventory remains available.` : "Review the exact offer quote. Lace will ask you to approve the Midnight reservation transaction before you pay the maker outside this demo."}</p>
+        <p>{activeIntent ? "Send a clearly marked demo receipt, then upload its original .eml file for Gmail DKIM verification. This is not a real payment confirmation." : isConnectedBuyerOfReservedIntent ? "This reservation belongs to your connected wallet. Restore its saved buyer intent to continue." : marketSnapshot && marketSnapshot.activeIntentCount !== "0" ? `${marketSnapshot.activeIntentCount} buyer reservation${marketSnapshot.activeIntentCount === "1" ? " is" : "s are"} active. You can reserve too while inventory remains available.` : "Review the exact offer quote. Lace will ask you to approve the Midnight reservation transaction before the demo receipt is sent."}</p>
         <div className="review-summary"><span>You pay<b>${displayPaymentAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</b></span><ArrowDownUp size={16} /><span>Contract quote<b>{displayTokenAmount.toLocaleString("en-US", { maximumFractionDigits: 6 })} tUSDC</b></span></div>
-        <div className="review-peer"><span className={`person-avatar ${currentOffer.color}`}>{currentOffer.initials}</span><span><small>Offer & network</small><b>{currentOffer.name} · Lace / {NETWORK_LABEL}</b><small>PayPal receipt template · synthetic test evidence only</small></span><span className="review-verified"><BadgeCheck size={14} /> Test</span></div>
+        <div className="review-peer"><span className={`person-avatar ${currentOffer.color}`}>{currentOffer.initials}</span><span><small>Offer & network</small><b>{currentOffer.name} · Lace / {NETWORK_LABEL}</b><small>Gmail DKIM · .eml upload · demo only</small></span><span className="review-verified"><BadgeCheck size={14} /> Test</span></div>
         {activeIntent && <div className="intent-reference"><span>Trade reference</span><b>{activeIntent.tradeReference}</b><span>Buyer recovery data is saved for this wallet in this browser.</span></div>}
         {(marketError || walletError) && <p role="alert" className="checkout-error">{marketError || walletError}</p>}
         {marketTxId && <p className="chain-tx-note">Transaction submitted: {marketTxId}</p>}
         {activeIntent ? <>
-          <button className="continue-button dialog-action" disabled={marketBusy} onClick={() => void submitDemoProof()}>{marketBusy ? "Requesting attestation / proving…" : "Create synthetic proof and submit"}<ArrowRight size={16} /></button>
+          <label className="receipt-email-row"><span>Receipt inbox<small>Send the demo email here, then download its original .eml file</small></span><input type="email" value={paymentEmail} onChange={(event) => changeReceiptEmail(event.target.value)} aria-label="Demo receipt destination email" /></label>
+          <button className="secondary-action" disabled={marketBusy} onClick={() => void sendDemoReceipt()}>{marketBusy ? "Sending demo receipt…" : activeIntent.receiptToken ? "Send another demo receipt" : "Send demo receipt"}</button>
+          {activeIntent.receiptToken && <div className="intent-reference"><span>Receipt sent</span><b>{activeIntent.recipientEmail}</b><span>In Gmail, choose “Show original” → “Download original”, then select the .eml file below.</span></div>}
+          <label className="receipt-email-row receipt-source-row"><span>Original email file<small>Upload the unchanged .eml file downloaded from Gmail “Show original”.</small></span><input type="file" accept=".eml,message/rfc822" aria-label="Upload original demo receipt EML file" disabled={receiptFileBusy || marketBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectReceiptFile(file); }} /></label>
+          {receiptFileName && <div className="intent-reference"><span>Original email selected</span><b>{receiptFileName}</b><span>The file will be checked without changing its original bytes.</span></div>}
+          <button className="continue-button dialog-action" disabled={marketBusy || receiptFileBusy || !receiptEmailBase64 || !activeIntent.receiptToken || !activeIntent.recipientEmail} onClick={() => void submitDemoProof(receiptEmailBase64)}>{marketBusy ? "Verifying DKIM and submitting…" : receiptFileBusy ? "Reading .eml file…" : "Verify receipt and submit"}<ArrowRight size={16} /></button>
           <button className="secondary-action" disabled={marketBusy} onClick={() => void cancelTrade()}>Cancel reserved intent</button>
           {marketError.includes("This saved intent is stale:") && <button className="secondary-action" disabled={marketBusy} onClick={discardStaleIntent}>Discard stale local intent</button>}
-          <div className="secure-note"><ShieldCheck size={13} /> Start the local attester before this proof step</div>
+          <div className="secure-note"><ShieldCheck size={13} /> No payment was made. The backend verifies Gmail DKIM and the signed receipt claims.</div>
         </> : isConnectedBuyerOfReservedIntent ? <>
           <button className="secondary-action" disabled={marketBusy} onClick={restoreSavedIntent}>Restore saved intent</button>
           <div className="secure-note"><ShieldCheck size={13} /> Without the saved buyer secret, the contract reservation cannot be proved or cancelled.</div>
         </> : <>
           <button className="continue-button dialog-action" disabled={marketBusy || !walletAddress || !marketSnapshot} onClick={() => void reserveTrade()}>{marketBusy ? "Waiting for Lace…" : walletAddress ? "Reserve with Lace" : "Connect Lace to continue"}<ArrowRight size={16} /></button>
-          <div className="secure-note"><CreditCard size={13} /> No PayPal payment is initiated by this synthetic demo.</div>
+          <div className="secure-note"><CreditCard size={13} /> No external payment is made in this demo flow.</div>
         </>}
       </section></div>}
     </main>

@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { attestPayPalEmail } from './email-attestation-flow';
 import { createSyntheticPaypalEmail, parseSyntheticPayPalEmail } from './synthetic-paypal-email';
+import { attestUploadedGmailDemoReceipt } from './resend-demo-attestation';
 
 try {
   process.loadEnvFile();
@@ -10,7 +11,7 @@ try {
 }
 
 const port = Number(process.env.HANDSHAKE_ATTESTER_PORT ?? '8787');
-const maxBodyBytes = 180 * 1024;
+const maxBodyBytes = 3 * 1024 * 1024;
 const server = createServer(async (request, response) => {
   response.setHeader('content-type', 'application/json; charset=utf-8');
   response.setHeader('cache-control', 'no-store');
@@ -26,7 +27,8 @@ const server = createServer(async (request, response) => {
     return;
   }
   const demoEndpoint = request.url === '/v1/demo/paypal/attest';
-  if (request.method !== 'POST' || (!demoEndpoint && request.url !== '/v1/paypal/attest')) {
+  const pastedGmailAttestEndpoint = request.url === '/v1/demo/resend/dkim-attest';
+  if (request.method !== 'POST' || (!demoEndpoint && !pastedGmailAttestEndpoint && request.url !== '/v1/paypal/attest')) {
     response.writeHead(404).end(JSON.stringify({ error: 'Not found' }));
     return;
   }
@@ -40,6 +42,11 @@ const server = createServer(async (request, response) => {
       chunks.push(data);
     }
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+    if (pastedGmailAttestEndpoint) {
+      const result = await attestUploadedGmailDemoReceipt(body);
+      response.writeHead(200).end(JSON.stringify(result));
+      return;
+    }
     const hex = (name: string) => {
       const value = body[name];
       if (typeof value !== 'string' || !/^(?:[a-f0-9]{2})+$/i.test(value)) throw new Error(`${name} must be even-length hex`);
@@ -100,4 +107,4 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, '127.0.0.1', () => console.log(`Synthetic Handshake attester listening on http://127.0.0.1:${port}`));
+server.listen(port, '127.0.0.1', () => console.log(`Handshake payment attester listening on http://127.0.0.1:${port}`));

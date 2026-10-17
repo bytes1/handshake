@@ -153,6 +153,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .rail-zelle { background: #ebe9fc; color: #6854b6; }
 .rail-venmo { background: #e1f1ff; color: #2682ca; }
 .rail-paypal { background: #e6effb; color: #2765b2; }
+.rail-gmail { background: #eaf3ec; color: #176455; }
 .rail-cashapp { background: #e5f6e7; color: #258744; }
 .network-selector { min-width: 126px; justify-content: space-between; color: #59645d; font-size: 10px; font-weight: 600; cursor: pointer; }
 .network-selector:hover { border-color: #cbd9ce; }
@@ -252,6 +253,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .review-verified { display: flex; align-items: center; gap: 3px; color: #5e9275; font-size: 8px; }
 .checkout-error { margin: 12px 0 0 !important; padding: 9px 10px; border: 1px solid #f1d4ce; border-radius: 7px; background: #fff8f6; color: #a34f43 !important; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chain-tx-note { overflow-wrap: anywhere; margin: 10px 0 0; color: #678071; font: 8px/1.5 var(--font-geist-mono), monospace; }
+.receipt-email-row { display: grid; gap: 7px; margin-top: 12px; color: #59665d; font-size: 10px; }
+.receipt-email-row > span { display: grid; gap: 4px; line-height: 1.4; }
+.receipt-email-row small { color: #929d94; font-size: 8px; }
+.receipt-email-row input { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #e4eae4; border-radius: 7px; outline: none; color: #435149; font: 10px var(--font-geist-sans), sans-serif; }
+.receipt-email-row input:focus { border-color: #8caf99; box-shadow: 0 0 0 2px #edf4ee; }
+.receipt-email-row input[type="file"] { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px; border: 1px solid #e4eae4; border-radius: 7px; outline: none; color: #69766d; font: 9px var(--font-geist-sans), sans-serif; }
+.receipt-email-row input[type="file"]::file-selector-button { margin-right: 9px; padding: 5px 8px; border: 1px solid #dfe8df; border-radius: 5px; background: #f8faf7; color: #526358; font: 8px var(--font-geist-sans), sans-serif; cursor: pointer; }
+.receipt-email-row input[type="file"]:focus { border-color: #8caf99; box-shadow: 0 0 0 2px #edf4ee; }
+.receipt-source-row { margin-top: 15px; }
 .intent-reference { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border: 1px solid #e7eee7; border-radius: 8px; background: #f8faf7; color: #87928a; font-size: 8px; }
 .intent-reference b { color: #43564a; font: 10px var(--font-geist-mono), monospace; }
 .secondary-action { width: 100%; margin-top: 9px; padding: 9px; border: 1px solid #e4eae4; border-radius: 7px; background: #fff; color: #77847a; font-size: 9px; cursor: pointer; }
