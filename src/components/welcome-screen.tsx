@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   ArrowDown,
   ArrowLeftRight,
@@ -45,6 +46,7 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
         </a>
         <div className="welcome-header-right">
           <span className="welcome-network"><i /> MIDNIGHT TESTNET PREVIEW</span>
+          <Link className="welcome-skip welcome-guide-link" href="/guide">User guide <ArrowUpRight size={14} /></Link>
           <button className="welcome-skip" onClick={enterMarketplace}>Skip intro <ArrowRight size={14} /></button>
         </div>
       </header>

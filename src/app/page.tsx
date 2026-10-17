@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   ArrowDownUp,
   ArrowLeftRight,
@@ -398,7 +399,7 @@ export default function Home() {
             <span className="network-copy"><b>Midnight network</b><small>{NETWORK_LABEL}</small></span>
             <span className="network-status" />
           </div>
-          <button className="nav-item support-link" onClick={() => notify("Help center is coming soon.")}><CircleHelp size={18} /> Help center</button>
+          <Link className="nav-item support-link" href="/guide"><CircleHelp size={18} /> Help center</Link>
           <button className="profile-row" onClick={walletAddress ? disconnectMidnightWallet : openWalletPicker}>
             <span className="profile-avatar">{walletAddress ? walletAddress.slice(0, 1).toUpperCase() : "G"}</span><span className="profile-copy"><b>{walletAddress ? `${walletAddress.slice(0, 7)}…${walletAddress.slice(-5)}` : "Guest account"}</b><small>{walletAddress ? `Midnight ${NETWORK_LABEL} · Disconnect` : "Connect a wallet"}</small></span><MoreHorizontal size={18} />
           </button>
@@ -414,7 +415,7 @@ export default function Home() {
         <div className="content-wrap">
           <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-star">✳</span> PEER TO PEER, MADE SIMPLE</div><h1>Move money <span>your way.</span></h1><p>Review an on-chain offer, then verify a clearly marked demo email before test tokens are released.</p></div>
-            <button className="how-button" onClick={() => notify("Pick an offer, pay directly, and get crypto after your payment is verified.")}><Sparkles size={15} /> How it works <ArrowUpRight size={14} /></button>
+            <Link className="how-button" href="/guide#steps"><Sparkles size={15} /> How it works <ArrowUpRight size={14} /></Link>
           </div>
 
           <div className="trade-layout">

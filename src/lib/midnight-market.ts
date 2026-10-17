@@ -384,13 +384,13 @@ export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet
   };
   let response: Response;
   try {
-    response = await fetch(`${attesterUrl}/v1/demo/resend/dkim-attest`, {
+    response = await fetch(`${attesterUrl}/v1/demo/gmail/dkim-attest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...attestationInput, rawEmailBase64 }),
     });
   } catch {
-    throw new Error("The reservation is safe, but the attester could not be reached. In midnight-contract, run `npm run attester:start`, then retry.");
+    throw new Error("The reservation is safe, but the attestor could not be reached. Check that the attestor is online and NEXT_PUBLIC_ATTESTER_URL points to its HTTPS address, then retry.");
   }
   const attestation = await response.json() as AttestationResponse;
   if (!response.ok) throw new Error(attestation.error ?? `Attester returned HTTP ${response.status}.`);

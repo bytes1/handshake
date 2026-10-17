@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log*
+.env
+.env.*
+!.env.example
+contracts/managed
+!contracts/managed/
+!contracts/managed/handshake-market
+contracts/managed/handshake-market/*
+!contracts/managed/handshake-market/contract
+contracts/managed/handshake-market/contract/*
+!contracts/managed/handshake-market/contract/index.js

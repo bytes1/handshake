@@ -17,6 +17,12 @@ build/
 
 # Contract artifacts
 contracts/managed/
+!contracts/managed/
+!contracts/managed/handshake-market/
+contracts/managed/handshake-market/*
+!contracts/managed/handshake-market/contract/
+contracts/managed/handshake-market/contract/*
+!contracts/managed/handshake-market/contract/index.js
 
 # Deployment info
 deployment.json
