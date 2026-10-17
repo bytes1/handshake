@@ -15,7 +15,7 @@ export type NetworkId = 'undeployed' | 'preview' | 'preprod';
 
 export const NETWORK_IDS: readonly NetworkId[] = ['undeployed', 'preview', 'preprod'] as const;
 
-// In a Docker Desktop devcontainer, the local devnet containers publish their
+// In a Docker Desktop devcontainer, local devnet containers publish their
 // ports on the Docker host, not on this workspace container's loopback.
 const LOCAL_DEVNET_HOST = process.env.MIDNIGHT_LOCAL_DEVNET_HOST ?? '127.0.0.1';
 
@@ -58,7 +58,7 @@ export const NETWORK_CONFIGS: Record<NetworkId, NetworkConfig> = {
     indexer:   `http://${LOCAL_DEVNET_HOST}:8088/api/v4/graphql`,
     indexerWS: `ws://${LOCAL_DEVNET_HOST}:8088/api/v4/graphql/ws`,
     node:      `ws://${LOCAL_DEVNET_HOST}:9944`,
-    proofServer: `http://${LOCAL_DEVNET_HOST}:6300`,
+    proofServer: 'http://127.0.0.1:6300',
     faucet: null,
     composeServices: ['node', 'indexer', 'proof-server'],
   },
@@ -73,9 +73,11 @@ export const NETWORK_CONFIGS: Record<NetworkId, NetworkConfig> = {
   },
   preprod: {
     networkId: 'preprod',
-    indexer:   'https://indexer.preprod.midnight.network/api/v4/graphql',
-    indexerWS: 'wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
-    node:      'https://rpc.preprod.midnight.network',
+    // Preprod's Midnight-hosted node/indexer endpoints were retired in Oct 2026.
+    // applyEnvOverrides adds the required Blockfrost project_id query.
+    indexer:   'https://midnight-preprod.blockfrost.io/api/v0',
+    indexerWS: 'wss://midnight-preprod.blockfrost.io/api/v0/ws',
+    node:      'https://rpc.midnight-preprod.blockfrost.io',
     proofServer: 'http://127.0.0.1:6300',
     faucet: 'https://midnight-tmnight-preprod.nethermind.dev',
     composeServices: ['proof-server'],
@@ -179,6 +181,19 @@ function applyEnvOverrides(base: NetworkConfig, env: NodeJS.ProcessEnv): Network
   for (const [field, varName] of ENV_OVERRIDES) {
     const v = env[varName];
     if (v) (out as unknown as Record<string, unknown>)[field] = v;
+  }
+  if (base.networkId === 'preprod') {
+    const projectId = env.MIDNIGHT_BLOCKFROST_PROJECT_ID?.trim() || env.BLOCKFROST_PROJECT_ID?.trim();
+    if (projectId) {
+      const query = `?project_id=${encodeURIComponent(projectId)}`;
+      if (!env.MIDNIGHT_INDEXER_URL) out.indexer = `${base.indexer}${query}`;
+      if (!env.MIDNIGHT_INDEXER_WS_URL) out.indexerWS = `${base.indexerWS}${query}`;
+      if (!env.MIDNIGHT_NODE_URL) out.node = `${base.node}${query}`;
+    } else if (!env.MIDNIGHT_INDEXER_URL || !env.MIDNIGHT_NODE_URL) {
+      throw new Error(
+        'Preprod now requires Blockfrost. Set MIDNIGHT_BLOCKFROST_PROJECT_ID or provide MIDNIGHT_INDEXER_URL and MIDNIGHT_NODE_URL.',
+      );
+    }
   }
   return out;
 }

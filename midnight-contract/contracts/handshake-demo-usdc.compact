@@ -1,0 +1,54 @@
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// Test-only token issuer. This mints an actual Midnight unshielded token, but
+// it is not Circle USDC and has no redemption value. The minter is the deployer
+// secret committed at construction; minting is capped for the lifetime of the
+// contract so a leaked demo key cannot create unbounded supply.
+export sealed ledger minterCommitment: Bytes<32>;
+export sealed ledger domain: Bytes<32>;
+export sealed ledger maximumSupply: Uint<64>;
+export ledger totalMinted: Uint<64>;
+
+circuit identityCommitment(secret: Bytes<32>): Bytes<32> {
+  // Constructor execution uses a dummy contract address in the local runtime,
+  // so a commitment that includes kernel.self() would differ after deployment.
+  // This purpose tag keeps the minter commitment domain-separated and stable.
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "handshake-demo-minter"), secret]);
+}
+
+constructor(
+  minterSecret: Bytes<32>,
+  tokenDomain: Bytes<32>,
+  supplyCap: Uint<64>
+) {
+  assert(supplyCap > 0, "Supply cap must be positive");
+  minterCommitment = disclose(identityCommitment(minterSecret));
+  domain = disclose(tokenDomain);
+  maximumSupply = disclose(supplyCap);
+  totalMinted = 0;
+}
+
+// Mints real tUSDC UTXOs to a Midnight user address. One token has six
+// decimals; amounts are base units (1 tUSDC = 1_000_000 units).
+export circuit mintDemo(
+  minterSecret: Bytes<32>,
+  recipient: UserAddress,
+  amount: Uint<64>
+): [] {
+  assert(identityCommitment(minterSecret) == minterCommitment, "Only the demo token minter can mint");
+  // Minted tUSDC is an unshielded token, so its amount and total supply are
+  // public. Disclose once and use the public value for token and ledger writes.
+  const disclosedAmount = disclose(amount);
+  assert(disclosedAmount > 0, "Mint amount must be positive");
+  assert(disclosedAmount <= maximumSupply - totalMinted, "Demo token supply cap exceeded");
+
+  mintUnshieldedToken(
+    domain,
+    disclosedAmount,
+    right<ContractAddress, UserAddress>(disclose(recipient))
+  );
+  totalMinted = (totalMinted + disclosedAmount) as Uint<64>;
+}
+

@@ -9,6 +9,7 @@ import { existsSync, rmSync } from "node:fs";
 const targets = [
   "contracts/managed",
   ".midnight-state.json",
+  ".midnight-demo-assets.json",
   ".midnight-wallet-state",
 ];
 

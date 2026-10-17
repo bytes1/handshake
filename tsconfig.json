@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "target": "ES2020",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -11,7 +15,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "plugins": [
       {
@@ -19,9 +23,45 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@midnight-ntwrk/compact-runtime": [
+        "./midnight-contract/node_modules/@midnight-ntwrk/compact-runtime"
+      ],
+      "@midnight-ntwrk/midnight-js-contracts": [
+        "./midnight-contract/node_modules/@midnight-ntwrk/midnight-js-contracts"
+      ],
+      "@midnight-ntwrk/midnight-js-http-client-proof-provider": [
+        "./midnight-contract/node_modules/@midnight-ntwrk/midnight-js-http-client-proof-provider"
+      ],
+      "@midnight-ntwrk/midnight-js-indexer-public-data-provider": [
+        "./midnight-contract/node_modules/@midnight-ntwrk/midnight-js-indexer-public-data-provider"
+      ],
+      "@midnight-ntwrk/midnight-js-network-id": [
+        "./midnight-contract/node_modules/@midnight-ntwrk/midnight-js-network-id"
+      ],
+      "@midnight-ntwrk/midnight-js-protocol/*": [
+        "./node_modules/@midnight-ntwrk/midnight-js-protocol/dist/*",
+        "./midnight-contract/node_modules/@midnight-ntwrk/midnight-js-protocol/dist/*"
+      ],
+      "@midnight-ntwrk/midnight-js-types": [
+        "./midnight-contract/node_modules/@midnight-ntwrk/midnight-js-types"
+      ],
+      "@scure/base": [
+        "./midnight-contract/node_modules/@scure/base"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "midnight-contract"
+  ]
 }

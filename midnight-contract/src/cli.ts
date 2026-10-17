@@ -68,14 +68,16 @@ async function createProviders(walletCtx: WalletContext) {
     getCoinPublicKey: () => walletCtx.shieldedSecretKeys.coinPublicKey,
     getEncryptionPublicKey: () => walletCtx.shieldedSecretKeys.encryptionPublicKey,
     async balanceTx(tx: any, ttl?: Date) {
-      // balanceUnboundTransaction -> finalizeRecipe is the complete balancing
-      // path in wallet-sdk 1.x; the earlier explicit signRecipe step is gone.
       const recipe = await walletCtx.wallet.balanceUnboundTransaction(
         tx,
         { shieldedSecretKeys: walletCtx.shieldedSecretKeys, dustSecretKey: walletCtx.dustSecretKey },
         { ttl: ttl ?? new Date(Date.now() + 30 * 60 * 1000) },
       );
-      return walletCtx.wallet.finalizeRecipe(recipe);
+      const signedRecipe = await walletCtx.wallet.signRecipe(
+        recipe,
+        (payload) => walletCtx.unshieldedKeystore.signData(payload),
+      );
+      return walletCtx.wallet.finalizeRecipe(signedRecipe);
     },
     submitTx: (tx: any) => walletCtx.wallet.submitTransaction(tx) as any,
   };

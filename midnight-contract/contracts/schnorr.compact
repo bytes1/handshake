@@ -1,0 +1,79 @@
+// Jubjub Schnorr verification polyfill for Compact 0.23 / toolchain 0.31.x.
+// Adapted from Midnight Foundation's Apache-2.0 example-zkloan:
+// https://github.com/midnightntwrk/example-zkloan/blob/main/contract/src/schnorr.compact
+// The challenge reduction values are explicit private arguments so this module
+// can be used without adding a contract witness implementation.
+module schnorr {
+  import CompactStandardLibrary;
+
+  export struct SchnorrSignature {
+    announcement: JubjubPoint;
+    response: Field;
+  }
+
+  struct SchnorrHashInput<#n> {
+    ann_x: Field;
+    ann_y: Field;
+    pk_x: Field;
+    pk_y: Field;
+    msg: Vector<n, Field>;
+  }
+
+  export circuit schnorrVerify<#n>(
+    msg: Vector<n, Field>,
+    signature: SchnorrSignature,
+    pk: JubjubPoint,
+    quotient: Uint<7>,
+    challengeRemainder: Uint<248>
+  ): [] {
+    const { announcement, response } = signature;
+    const cFull = transientHash<SchnorrHashInput<n>>(
+      SchnorrHashInput<n> {
+        ann_x: jubjubPointX(announcement),
+        ann_y: jubjubPointY(announcement),
+        pk_x: jubjubPointX(pk),
+        pk_y: jubjubPointY(pk),
+        msg: msg
+      }
+    );
+
+    const TWO_248: Field =
+      452312848583266388373324160190187140051835877600158453279131187530910662656 as Field;
+
+    // transientHash is a BLS12-381 scalar while ecMul needs a Jubjub scalar.
+    // Bound q and verify the exact quotient/remainder decomposition as in the
+    // Midnight Foundation reference implementation.
+    assert(quotient < 116, "Schnorr quotient out of range");
+    assert(
+      quotient * TWO_248 + (challengeRemainder as Field) == cFull,
+      "Invalid Schnorr challenge reduction"
+    );
+
+    const challenge = challengeRemainder as Field;
+    const lhs = ecMulGenerator(response);
+    const rhs = ecAdd(announcement, ecMul(pk, challenge));
+    assert(
+      jubjubPointX(lhs) == jubjubPointX(rhs) &&
+        jubjubPointY(lhs) == jubjubPointY(rhs),
+      "Invalid attester signature"
+    );
+  }
+
+  export pure circuit schnorrChallenge(
+    ann_x: Field,
+    ann_y: Field,
+    pk_x: Field,
+    pk_y: Field,
+    msg: Vector<4, Field>
+  ): Field {
+    return transientHash<SchnorrHashInput<4>>(
+      SchnorrHashInput<4> {
+        ann_x: ann_x,
+        ann_y: ann_y,
+        pk_x: pk_x,
+        pk_y: pk_y,
+        msg: msg
+      }
+    );
+  }
+}

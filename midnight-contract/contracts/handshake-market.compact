@@ -1,0 +1,313 @@
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+import "schnorr" prefix Schnorr_;
+
+export { Schnorr_SchnorrSignature };
+
+// A one-maker demo offer. Seller inventory is held as real unshielded Midnight
+// tUSDC in this contract. Payment claims are authorized by the trusted off-chain
+// email attester and verified in-circuit with Jubjub Schnorr.
+
+export sealed ledger makerCommitment: Bytes<32>;
+export sealed ledger tokenDomain: Bytes<32>;
+export sealed ledger tokenContract: ContractAddress;
+export sealed ledger offerExpiresAt: Uint<64>;
+export sealed ledger minimumFill: Uint<64>;
+export sealed ledger maximumFill: Uint<64>;
+export sealed ledger exchangeRateBps: Uint<32>;
+export sealed ledger attesterPublicKey: JubjubPoint;
+
+// initialLiquidity is the maximum inventory the maker may escrow. Liquidity is
+// zero until fundOffer receives the real tUSDC UTXOs from the maker.
+export ledger initialLiquidity: Uint<64>;
+export ledger availableLiquidity: Uint<64>;
+export ledger escrowedBalance: Uint<64>;
+// Buyer reservations are keyed by the public Midnight recipient address. This
+// lets many wallets reserve against the same offer without overwriting one
+// global buyer record. A wallet can hold at most one active intent per offer.
+export ledger intentCommitments: Map<Bytes<32>, Bytes<32>>;
+export ledger intentActive: Map<Bytes<32>, Boolean>;
+export ledger intentAmounts: Map<Bytes<32>, Uint<64>>;
+export ledger intentPaymentMinors: Map<Bytes<32>, Uint<64>>;
+export ledger intentNonces: Map<Bytes<32>, Uint<32>>;
+export ledger activeIntentCount: Uint<32>;
+export ledger intentNonce: Uint<32>;
+export ledger paymentProofCommitment: Bytes<32>;
+export ledger consumedNullifiers: Set<Bytes<32>>;
+export ledger consumedReceipts: Set<Bytes<32>>;
+export ledger tradeState: Uint<8>;
+
+struct PaymentAttestationMessage {
+  version: Uint<8>;
+  contractId: Bytes<32>;
+  buyerCommitment: Bytes<32>;
+  intentNonce: Uint<32>;
+  amount: Uint<64>;
+  providerId: Uint<8>;
+  receiptCommitment: Bytes<32>;
+  nullifier: Bytes<32>;
+}
+
+// The constructor's local runtime uses a dummy self address, so identity
+// commitments must not depend on kernel.self(). Maker and taker secrets are
+// freshly generated per deployment/intent; this purpose tag domain-separates
+// them from other uses of the same secret.
+circuit identityCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "handshake-market-identity"), secret]);
+}
+
+// tradeState is a compatibility summary: 0 = no active intents, 1 = at least
+// one active intent, 2 = a proof was accepted and no intent remains active.
+constructor(
+  makerSecret: Bytes<32>,
+  liquidityCapacity: Uint<64>,
+  minFill: Uint<64>,
+  maxFill: Uint<64>,
+  rateBps: Uint<32>,
+  trustedAttester: JubjubPoint,
+  demoTokenDomain: Bytes<32>,
+  demoTokenContract: ContractAddress,
+  expiresAt: Uint<64>
+) {
+  assert(liquidityCapacity > 0, "Liquidity capacity must be positive");
+  assert(minFill > 0, "Minimum fill must be positive");
+  assert(minFill <= maxFill, "Minimum fill exceeds maximum fill");
+  assert(maxFill <= liquidityCapacity, "Maximum fill exceeds liquidity capacity");
+  assert(rateBps > 0, "Exchange rate must be positive");
+  assert(expiresAt > 0, "Offer expiry must be set");
+  assert(
+    jubjubPointX(trustedAttester) != 0 || jubjubPointY(trustedAttester) != 1,
+    "Attester public key cannot be the identity point"
+  );
+
+  makerCommitment = disclose(identityCommitment(makerSecret));
+  tokenDomain = disclose(demoTokenDomain);
+  tokenContract = disclose(demoTokenContract);
+  offerExpiresAt = disclose(expiresAt);
+  minimumFill = disclose(minFill);
+  maximumFill = disclose(maxFill);
+  exchangeRateBps = disclose(rateBps);
+  attesterPublicKey = disclose(trustedAttester);
+  initialLiquidity = disclose(liquidityCapacity);
+  availableLiquidity = 0;
+  escrowedBalance = 0;
+  intentNonce = 0;
+  activeIntentCount = 0;
+  tradeState = 0;
+}
+
+// Seller escrows demo tokens before buyers can reserve against this offer.
+export circuit fundOffer(makerSecret: Bytes<32>, amount: Uint<64>): [] {
+  assert(identityCommitment(makerSecret) == makerCommitment, "Only the maker can fund this offer");
+  assert(blockTimeLt(offerExpiresAt), "Offer has expired");
+  // Offer inventory is public because the token is unshielded and book depth
+  // is visible. Explicitly disclose before token and ledger operations.
+  const disclosedAmount = disclose(amount);
+  assert(disclosedAmount > 0, "Funding amount must be positive");
+  assert(disclosedAmount <= initialLiquidity - escrowedBalance, "Offer capacity exceeded");
+
+  receiveUnshielded(tokenType(tokenDomain, tokenContract), disclosedAmount as Uint<128>);
+  escrowedBalance = (escrowedBalance + disclosedAmount) as Uint<64>;
+  availableLiquidity = (availableLiquidity + disclosedAmount) as Uint<64>;
+}
+
+// Remove only inventory that is not reserved by a buyer.
+export circuit withdrawOffer(
+  makerSecret: Bytes<32>,
+  recipient: UserAddress,
+  amount: Uint<64>
+): [] {
+  assert(identityCommitment(makerSecret) == makerCommitment, "Only the maker can withdraw offer inventory");
+  const disclosedAmount = disclose(amount);
+  assert(disclosedAmount > 0, "Withdrawal amount must be positive");
+  assert(disclosedAmount <= availableLiquidity, "Inventory is reserved or unavailable");
+  assert(unshieldedBalanceGte(tokenType(tokenDomain, tokenContract), disclosedAmount as Uint<128>), "Escrow token balance is insufficient");
+
+  sendUnshielded(
+    tokenType(tokenDomain, tokenContract),
+    disclosedAmount as Uint<128>,
+    right<ContractAddress, UserAddress>(disclose(recipient))
+  );
+  availableLiquidity = availableLiquidity - disclosedAmount;
+  escrowedBalance = escrowedBalance - disclosedAmount;
+}
+
+// Reserve inventory for a buyer. The recipient is public because this demo
+// pays the unshielded tUSDC directly to that Midnight address on settlement.
+export circuit reserveIntent(
+  takerSecret: Bytes<32>,
+  amount: Uint<64>,
+  paymentAmountMinor: Uint<64>,
+  recipient: UserAddress
+): [] {
+  assert(blockTimeLt(offerExpiresAt), "Offer has expired");
+  const disclosedAmount = disclose(amount);
+  const disclosedPaymentMinor = disclose(paymentAmountMinor);
+  assert(disclosedAmount >= minimumFill, "Amount is below the minimum fill");
+  assert(disclosedAmount <= maximumFill, "Amount exceeds the maximum fill");
+  assert(disclosedAmount <= availableLiquidity, "Insufficient available liquidity");
+  assert(disclosedPaymentMinor > 0, "Payment amount must be positive");
+  const rateAsUint64 = exchangeRateBps as Uint<64>;
+  // Compact does not support integer division. The checked Uint<64> cast on
+  // the product below rejects overflow, and equality binds it to the reserved
+  // token amount; the latter is also bounded by maximumFill above.
+  assert(((disclosedPaymentMinor * rateAsUint64) as Uint<64>) == disclosedAmount, "Token amount does not match the offer rate");
+
+  const disclosedTaker = disclose(identityCommitment(takerSecret));
+  const disclosedRecipient = disclose(recipient);
+  const recipientKey = disclose(disclosedRecipient.bytes);
+  assert(!intentActive.member(recipientKey) || !intentActive.lookup(recipientKey), "This wallet already has an active intent on this offer");
+  assert(activeIntentCount < 4294967295 as Uint<32>, "Offer active intent counter exhausted");
+  assert(intentNonce < 4294967295 as Uint<32>, "Offer intent counter exhausted");
+  intentNonce = (intentNonce + 1) as Uint<32>;
+  availableLiquidity = availableLiquidity - disclosedAmount;
+  intentCommitments.insert(recipientKey, disclosedTaker);
+  intentActive.insert(recipientKey, true);
+  intentAmounts.insert(recipientKey, disclosedAmount);
+  intentPaymentMinors.insert(recipientKey, disclosedPaymentMinor);
+  intentNonces.insert(recipientKey, intentNonce);
+  activeIntentCount = (activeIntentCount + 1) as Uint<32>;
+  tradeState = 1;
+}
+
+// Let the buyer abandon a reserved intent and return its quantity to the offer.
+export circuit cancelIntent(takerSecret: Bytes<32>, recipient: UserAddress): [] {
+  const disclosedRecipient = disclose(recipient);
+  const recipientKey = disclose(disclosedRecipient.bytes);
+  assert(intentActive.member(recipientKey) && intentActive.lookup(recipientKey), "This wallet has no active intent to cancel");
+  assert(
+    identityCommitment(takerSecret) == intentCommitments.lookup(recipientKey),
+    "Only the buyer who reserved this intent can cancel it"
+  );
+  assert(activeIntentCount > 0, "Offer active intent counter is inconsistent");
+  const amount = intentAmounts.lookup(recipientKey);
+  const restoredLiquidity = (availableLiquidity as Uint<128>) + (amount as Uint<128>);
+  assert(restoredLiquidity <= initialLiquidity as Uint<128>, "Restored inventory exceeds offer capacity");
+  availableLiquidity = restoredLiquidity as Uint<64>;
+  intentActive.insert(recipientKey, false);
+  activeIntentCount = (activeIntentCount - 1) as Uint<32>;
+  if (activeIntentCount == 0) { tradeState = 0; }
+}
+
+// If the offer expires while a buyer is still reserved, release the inventory
+// lock. The maker can then withdraw the returned inventory with withdrawOffer.
+export circuit expireIntent(recipient: UserAddress): [] {
+  const disclosedRecipient = disclose(recipient);
+  const recipientKey = disclose(disclosedRecipient.bytes);
+  assert(intentActive.member(recipientKey) && intentActive.lookup(recipientKey), "This wallet has no active intent to expire");
+  assert(blockTimeGt(offerExpiresAt), "Offer has not expired");
+  assert(activeIntentCount > 0, "Offer active intent counter is inconsistent");
+  const amount = intentAmounts.lookup(recipientKey);
+  const restoredLiquidity = (availableLiquidity as Uint<128>) + (amount as Uint<128>);
+  assert(restoredLiquidity <= initialLiquidity as Uint<128>, "Restored inventory exceeds offer capacity");
+  availableLiquidity = restoredLiquidity as Uint<64>;
+  intentActive.insert(recipientKey, false);
+  activeIntentCount = (activeIntentCount - 1) as Uint<32>;
+  if (activeIntentCount == 0) { tradeState = 0; }
+}
+
+// Build the canonical attestation message in a pure circuit so the off-chain
+// attester signs the exact same transcript that this contract verifies.
+export pure circuit paymentAttestationMessage(
+  contractId: Bytes<32>,
+  buyerCommitment: Bytes<32>,
+  nonce: Uint<32>,
+  amount: Uint<64>,
+  providerId: Uint<8>,
+  receiptCommitment: Bytes<32>,
+  nullifier: Bytes<32>
+): Vector<4, Field> {
+  const digest = transientHash<PaymentAttestationMessage>(
+    PaymentAttestationMessage {
+      version: 1,
+      contractId: contractId,
+      buyerCommitment: buyerCommitment,
+      intentNonce: nonce,
+      amount: amount,
+      providerId: providerId,
+      receiptCommitment: receiptCommitment,
+      nullifier: nullifier
+    }
+  );
+  return [digest, 0 as Field, 0 as Field, 0 as Field];
+}
+
+// Keep the exact challenge transcript available to TypeScript attester code.
+export pure circuit schnorrChallenge(
+  ann_x: Field,
+  ann_y: Field,
+  pk_x: Field,
+  pk_y: Field,
+  msg: Vector<4, Field>
+): Field {
+  return Schnorr_schnorrChallenge(ann_x, ann_y, pk_x, pk_y, msg);
+}
+
+// A buyer may submit only a payment claim signed by the configured attester.
+// DKIM validation and provider-specific receipt parsing happen off-chain; the
+// Compact proof verifies the attester's Jubjub Schnorr signature and binds it
+// to this offer, buyer, amount, provider, receipt, and buyer-chosen nullifier.
+export circuit submitPaymentProof(
+  takerSecret: Bytes<32>,
+  recipient: UserAddress,
+  providerId: Uint<8>,
+  receiptCommitment: Bytes<32>,
+  nullifier: Bytes<32>,
+  signature: Schnorr_SchnorrSignature,
+  quotient: Uint<7>,
+  challengeRemainder: Uint<248>
+): [] {
+  const disclosedRecipient = disclose(recipient);
+  const recipientKey = disclose(disclosedRecipient.bytes);
+  assert(intentActive.member(recipientKey) && intentActive.lookup(recipientKey), "This wallet has no active intent awaiting payment proof");
+  assert(blockTimeLt(offerExpiresAt), "Offer expired before payment proof");
+  assert(
+    identityCommitment(takerSecret) == intentCommitments.lookup(recipientKey),
+    "Only the buyer who reserved this intent can submit its payment proof"
+  );
+  assert(activeIntentCount > 0, "Offer active intent counter is inconsistent");
+  assert(providerId == 1, "Unsupported payment provider");
+
+  // Replay keys become public ledger state. Declare that disclosure explicitly
+  // before using them in Set ledger operations.
+  const disclosedNullifier = disclose(nullifier);
+  const disclosedReceiptCommitment = disclose(receiptCommitment);
+  assert(!consumedNullifiers.member(disclosedNullifier), "Payment nullifier already used");
+  assert(!consumedReceipts.member(disclosedReceiptCommitment), "Payment receipt already used");
+
+  const message = paymentAttestationMessage(
+    kernel.self().bytes,
+    intentCommitments.lookup(recipientKey),
+    intentNonces.lookup(recipientKey),
+    intentPaymentMinors.lookup(recipientKey),
+    providerId,
+    disclosedReceiptCommitment,
+    disclosedNullifier
+  );
+  Schnorr_schnorrVerify<4>(
+    message,
+    signature,
+    attesterPublicKey,
+    quotient,
+    challengeRemainder
+  );
+
+  // A valid proof and the token payout are atomic: the intent cannot reach the
+  // accepted state unless the escrow actually contains the promised tUSDC.
+  const amount = intentAmounts.lookup(recipientKey);
+  assert(unshieldedBalanceGte(tokenType(tokenDomain, tokenContract), amount as Uint<128>), "Escrow token balance is insufficient");
+  sendUnshielded(
+    tokenType(tokenDomain, tokenContract),
+    amount as Uint<128>,
+    right<ContractAddress, UserAddress>(disclosedRecipient)
+  );
+
+  consumedNullifiers.insert(disclosedNullifier);
+  consumedReceipts.insert(disclosedReceiptCommitment);
+  paymentProofCommitment = disclosedReceiptCommitment;
+  escrowedBalance = escrowedBalance - amount;
+  intentActive.insert(recipientKey, false);
+  activeIntentCount = (activeIntentCount - 1) as Uint<32>;
+  if (activeIntentCount == 0) { tradeState = 2; } else { tradeState = 1; }
+}
