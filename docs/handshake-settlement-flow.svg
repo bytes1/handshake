@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="570" viewBox="0 0 1280 570" role="img" aria-labelledby="title desc">
+  <title id="title">Handshake buyer settlement lifecycle</title>
+  <desc id="desc">A maker funds an offer, a buyer reserves test tokens, a demo receipt is sent, the original email is verified off-chain, and the buyer submits an attestation that triggers contract settlement.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#101820"/><stop offset="1" stop-color="#0b1016"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#91e5c2"/></marker>
+    <style>
+      .title{font:700 30px Arial,sans-serif;fill:#f4f7f8}.sub{font:16px Arial,sans-serif;fill:#b2bec8}.step{fill:#17222b;stroke:#34414b;stroke-width:1.5}.end{fill:#18242b;stroke:#91e5c2;stroke-width:2}.n{font:700 14px Arial,sans-serif;fill:#91e5c2;letter-spacing:1px}.h{font:700 19px Arial,sans-serif;fill:#f4f7f8}.p{font:14px Arial,sans-serif;fill:#b2bec8}.a{fill:none;stroke:#91e5c2;stroke-width:2.5;marker-end:url(#arrow)}.tag{font:700 12px Arial,sans-serif;fill:#f3bd78}
+    </style>
+  </defs>
+  <rect width="1280" height="570" rx="26" fill="url(#bg)"/>
+  <text class="title" x="54" y="60">From reservation to settlement</text>
+  <text class="sub" x="54" y="91">The buyer submits the email for verification, then controls the on-chain transaction.</text>
+
+  <rect class="step" x="54" y="178" width="205" height="210" rx="16"/>
+  <text class="n" x="76" y="216">01 / MAKER</text>
+  <text class="h" x="76" y="256">Funds offer</text>
+  <text class="p" x="76" y="291">Test tUSDC enters</text>
+  <text class="p" x="76" y="313">contract escrow.</text>
+
+  <rect class="step" x="302" y="178" width="205" height="210" rx="16"/>
+  <text class="n" x="324" y="216">02 / BUYER</text>
+  <text class="h" x="324" y="256">Reserves</text>
+  <text class="p" x="324" y="291">Lace submits an intent.</text>
+  <text class="p" x="324" y="313">Liquidity is locked.</text>
+
+  <rect class="step" x="550" y="178" width="205" height="210" rx="16"/>
+  <text class="n" x="572" y="216">03 / EMAIL</text>
+  <text class="h" x="572" y="256">Receipt sent</text>
+  <text class="p" x="572" y="291">Demo email is clearly</text>
+  <text class="p" x="572" y="313">marked as unpaid.</text>
+
+  <rect class="step" x="798" y="178" width="205" height="210" rx="16"/>
+  <text class="n" x="820" y="216">04 / ATTESTER</text>
+  <text class="h" x="820" y="256">Email checked</text>
+  <text class="p" x="820" y="291">Original .eml and</text>
+  <text class="p" x="820" y="313">DKIM checked off-chain.</text>
+
+  <rect class="end" x="1046" y="178" width="205" height="210" rx="16"/>
+  <text class="n" x="1068" y="216">05 / MIDNIGHT</text>
+  <text class="h" x="1068" y="256">Settles</text>
+  <text class="p" x="1068" y="291">Contract checks signature</text>
+  <text class="p" x="1068" y="313">and pays test tUSDC.</text>
+
+  <path class="a" d="M259 282H292"/><path class="a" d="M507 282H540"/><path class="a" d="M755 282H788"/><path class="a" d="M1003 282H1036"/>
+  <text class="tag" x="58" y="449">DEMO BOUNDARY</text>
+  <text class="p" x="58" y="480">The receipt simulates evidence only. No fiat payment is made or verified by this demo.</text>
+  <text class="p" x="58" y="520">The contract verifies the attester's signed claim; Gmail DKIM verification remains an off-chain responsibility.</text>
+</svg>
