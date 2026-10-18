@@ -338,7 +338,7 @@ type AttestationResponse = {
 
 export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet, intent: ActiveIntent, rawEmailBase64: string) {
   if (!rawEmailBase64) throw new Error("Upload the original Gmail .eml file to verify this receipt.");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(intent.recipientEmail)) throw new Error("Send the demo receipt to a valid email address before uploading its .eml file.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(intent.recipientEmail)) throw new Error("Send the receipt to a valid email address before uploading its .eml file.");
   const { publicDataProvider, contract } = await contractFor(wallet);
   if (!intent.buyerAddress) throw new Error("This saved reservation is missing its buyer wallet address.");
   const recipientKey = userAddressBytes(intent.buyerAddress).bytes;

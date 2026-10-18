@@ -14,8 +14,8 @@ const steps = [
   },
   {
     number: "03",
-    title: "Send the demo receipt email",
-    body: "In the receipt and submit screen, enter the inbox that should receive the demo email and send it. This email is clearly marked as a demo; it is not a payment confirmation and no external payment is made.",
+    title: "Send the testnet receipt email",
+    body: "In the receipt and submit screen, enter the inbox that should receive the testnet email and send it. It is not a payment confirmation and no external payment is made.",
   },
   {
     number: "04",
@@ -34,15 +34,15 @@ export default function UserGuide() {
     <main className="guide-shell">
       <header className="guide-header">
         <Link className="guide-back" href="/"><ArrowLeft size={16} /> Back to Handshake</Link>
-        <span className="guide-network"><i /> MIDNIGHT PREVIEW · DEMO ONLY</span>
+        <span className="guide-network"><i /> MIDNIGHT PREVIEW NETWORK</span>
       </header>
 
       <div className="guide-content">
         <section className="guide-hero">
           <div className="guide-eyebrow"><CircleHelp size={14} /> HANDSHAKE USER GUIDE</div>
-          <h1>Complete a demo trade</h1>
+          <h1>Complete a testnet trade</h1>
           <p>Follow these steps to reserve an on-chain offer, verify its Gmail receipt, and submit the proof from your browser wallet.</p>
-          <div className="guide-notice"><ShieldCheck size={19} /><span><b>Preview testnet only</b><small>Handshake uses test tokens and a clearly marked demo email. It does not make or confirm a real-world payment.</small></span></div>
+          <div className="guide-notice"><ShieldCheck size={19} /><span><b>Preview testnet only</b><small>Handshake uses test tokens and a testnet receipt email. It does not make or confirm a real-world payment.</small></span></div>
         </section>
 
         <section className="guide-section" id="steps">
@@ -65,8 +65,8 @@ export default function UserGuide() {
         <section className="guide-section">
           <div className="guide-section-heading"><span>YOUR DATA</span><h2>Privacy and safe use</h2></div>
           <div className="guide-prose">
-            <p>When you verify a receipt, the browser sends the complete uploaded .eml file to the configured Handshake attestor. The original message contains its email headers, body, and receipt token. Only upload the demo receipt you intend to use.</p>
-            <p>The attestor returns a cryptographic statement for the marketplace contract. The service's signing key and receipt secret stay on the server; never put these values in frontend settings or share them. A passing receipt is evidence for this demo workflow only.</p>
+            <p>When you verify a receipt, the browser sends the complete uploaded .eml file to the configured Handshake attestor. The original message contains its email headers, body, and receipt token. Only upload the testnet receipt you intend to use.</p>
+            <p>The attestor returns a cryptographic statement for the marketplace contract. The service's signing key and receipt secret stay on the server; never put these values in frontend settings or share them. A passing receipt is evidence for this testnet workflow only.</p>
             <p>Your reservation recovery information is saved in this browser profile. To restore, cancel, or complete an unfinished reservation, reconnect the same Lace wallet in the same browser profile. Clearing browser storage can remove the local recovery details.</p>
           </div>
         </section>
@@ -76,14 +76,14 @@ export default function UserGuide() {
           <div className="guide-faq">
             <details><summary>Can I use the same .eml file twice?</summary><p>You can upload it again to retry verification for the same active reservation if it has not been completed. The receipt is tied to its trade details and cannot be used for a new reservation. Once accepted on-chain, it cannot release the offer a second time.</p></details>
             <details><summary>Why does Gmail DKIM or the body hash fail?</summary><p>Download the original message from Gmail using Show original → Download original. Upload that .eml unchanged. Pasted source, forwarded mail, or a file modified by an editor or mail client may no longer match the signed body.</p></details>
-            <details><summary>Why does it say the signed headers are missing?</summary><p>The message needs a passing Gmail DKIM signature whose signed-header list includes From, To, and Subject. Make sure you selected the original Handshake demo receipt, not a forwarded copy.</p></details>
+            <details><summary>Why does it say the signed headers are missing?</summary><p>The message needs a passing Gmail DKIM signature whose signed-header list includes From, To, and Subject. Make sure you selected the original Handshake receipt, not a forwarded copy.</p></details>
             <details><summary>Why is my receipt rejected as mismatched?</summary><p>Confirm the active reservation is still open and that the email was sent for that reservation to the same recipient shown in the receipt and submit screen. A new reservation needs its own newly sent receipt.</p></details>
             <details><summary>Why can’t the app reach the attestor?</summary><p>The public attestor must be online over HTTPS. Its CORS allowlist must include the exact origin of this frontend, and the frontend must have been rebuilt with the correct NEXT_PUBLIC_ATTESTER_URL.</p></details>
             <details><summary>Can I close the page and continue later?</summary><p>Reconnect the same Lace wallet from the same browser profile and choose Continue reserved trade or Recover reserved trade. If this reservation is no longer wanted, use Cancel reserved intent and approve the transaction in Lace.</p></details>
           </div>
         </section>
 
-        <div className="guide-end"><span>This is a demo on Midnight Preview. No real payment is made.</span><Link href="/">Return to the offer <ArrowRight size={16} /></Link></div>
+        <div className="guide-end"><span>This is a testnet experience on Midnight Preview. No real payment is made.</span><Link href="/">Return to the offer <ArrowRight size={16} /></Link></div>
       </div>
     </main>
   );

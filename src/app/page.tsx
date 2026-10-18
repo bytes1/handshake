@@ -285,7 +285,7 @@ export default function Home() {
       setReceiptEmailBase64("");
       setReceiptFileName("");
       setMarketTxId(result.txId);
-      notify("Proof accepted. Test tUSDC released to your Lace wallet.");
+      notify("Proof accepted. Testnet tUSDC released to your Lace wallet.");
       await refreshMarket();
     } catch (error) {
       setMarketError(formatError(error));
@@ -296,7 +296,7 @@ export default function Home() {
     if (!activeIntent) return;
     const recipient = paymentEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
-      setMarketError("Enter a valid email address for the demo receipt.");
+      setMarketError("Enter a valid email address for the receipt.");
       return;
     }
     setMarketBusy(true);
@@ -313,7 +313,7 @@ export default function Home() {
       if (!response.ok || !result.receiptToken) throw new Error(result.error ?? `Receipt email failed (HTTP ${response.status}).`);
       const updated = updateSavedActiveIntent(intent, { receiptToken: result.receiptToken, resendEmailId: result.resendEmailId });
       setActiveIntent(updated);
-      notify(`Demo receipt sent to ${result.sentTo}. No payment was made.`);
+      notify(`Receipt sent to ${result.sentTo}. No external payment was made.`);
     } catch (error) {
       setMarketError(`Gmail receipt send failed: ${formatError(error)}`);
     } finally { setMarketBusy(false); }
@@ -414,7 +414,7 @@ export default function Home() {
 
         <div className="content-wrap">
           <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-star">✳</span> PEER TO PEER, MADE SIMPLE</div><h1>Move money <span>your way.</span></h1><p>Review an on-chain offer, then verify a clearly marked demo email before test tokens are released.</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-star">✳</span> PEER TO PEER, MADE SIMPLE</div><h1>Move money <span>your way.</span></h1><p>Compare an offer, verify your receipt, and settle transparently on Midnight.</p></div>
             <Link className="how-button" href="/guide#steps"><Sparkles size={15} /> How it works <ArrowUpRight size={14} /></Link>
           </div>
 
@@ -456,7 +456,7 @@ export default function Home() {
               })}</div>
               {marketError && <p role="alert" className="checkout-error">{marketError}</p>}
               {marketTxId && <p className="chain-tx-note">Latest wallet transaction: {marketTxId}</p>}
-              <div className="trust-panel"><div className="trust-icon"><ShieldCheck size={18} /></div><div><b>Contract backed tUSDC escrow</b><p>The buyer reserves inventory, receives a clearly labeled demo email, then uploads the original message for backend Gmail DKIM verification. No external payment is made.</p><button onClick={() => notify(`Market address: ${MARKET_ADDRESS}`)}>View market address <ArrowUpRight size={12} /></button></div><div className="trust-watermark">✳</div></div>
+              <div className="trust-panel"><div className="trust-icon"><ShieldCheck size={18} /></div><div><b>Contract backed tUSDC escrow</b><p>The buyer reserves inventory, then uploads the original Gmail message for DKIM verification. No external payment is made.</p><button onClick={() => notify(`Market address: ${MARKET_ADDRESS}`)}>View market address <ArrowUpRight size={12} /></button></div><div className="trust-watermark">✳</div></div>
             </section>
           </div>
 
@@ -471,17 +471,17 @@ export default function Home() {
         <div className="dialog-icon"><Banknote size={21} /></div>
         <div className="dialog-kicker">{activeIntent ? "BUYER INTENT RESERVED" : `${NETWORK_LABEL.toUpperCase()} TRADE`}</div>
         <h2 id="trade-title">{activeIntent ? "Payment proof" : isConnectedBuyerOfReservedIntent ? "Recover reserved trade" : "Reserve this offer"}</h2>
-        <p>{activeIntent ? "Send a clearly marked demo receipt, then upload its original .eml file for Gmail DKIM verification. This is not a real payment confirmation." : isConnectedBuyerOfReservedIntent ? "This reservation belongs to your connected wallet. Restore its saved buyer intent to continue." : marketSnapshot && marketSnapshot.activeIntentCount !== "0" ? `${marketSnapshot.activeIntentCount} buyer reservation${marketSnapshot.activeIntentCount === "1" ? " is" : "s are"} active. You can reserve too while inventory remains available.` : "Review the exact offer quote. Lace will ask you to approve the Midnight reservation transaction before the demo receipt is sent."}</p>
+        <p>{activeIntent ? "Send a receipt, then upload its original .eml file for Gmail DKIM verification. No external payment is made." : isConnectedBuyerOfReservedIntent ? "This reservation belongs to your connected wallet. Restore its saved buyer intent to continue." : marketSnapshot && marketSnapshot.activeIntentCount !== "0" ? `${marketSnapshot.activeIntentCount} buyer reservation${marketSnapshot.activeIntentCount === "1" ? " is" : "s are"} active. You can reserve too while inventory remains available.` : "Review the exact offer quote. Lace will ask you to approve the Midnight reservation transaction before the receipt is sent."}</p>
         <div className="review-summary"><span>You pay<b>${displayPaymentAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</b></span><ArrowDownUp size={16} /><span>Contract quote<b>{displayTokenAmount.toLocaleString("en-US", { maximumFractionDigits: 6 })} tUSDC</b></span></div>
-        <div className="review-peer"><span className={`person-avatar ${currentOffer.color}`}>{currentOffer.initials}</span><span><small>Offer & network</small><b>{currentOffer.name} · Lace / {NETWORK_LABEL}</b><small>Gmail DKIM · .eml upload · demo only</small></span><span className="review-verified"><BadgeCheck size={14} /> Test</span></div>
+        <div className="review-peer"><span className={`person-avatar ${currentOffer.color}`}>{currentOffer.initials}</span><span><small>Offer & network</small><b>{currentOffer.name} · Lace / {NETWORK_LABEL}</b><small>Gmail DKIM · .eml verification</small></span><span className="review-verified"><BadgeCheck size={14} /> Testnet</span></div>
         {activeIntent && <div className="intent-reference"><span>Trade reference</span><b>{activeIntent.tradeReference}</b><span>Buyer recovery data is saved for this wallet in this browser.</span></div>}
         {(marketError || walletError) && <p role="alert" className="checkout-error">{marketError || walletError}</p>}
         {marketTxId && <p className="chain-tx-note">Transaction submitted: {marketTxId}</p>}
         {activeIntent ? <>
-          <label className="receipt-email-row"><span>Receipt inbox<small>Send the demo email here, then download its original .eml file</small></span><input type="email" value={paymentEmail} onChange={(event) => changeReceiptEmail(event.target.value)} aria-label="Demo receipt destination email" /></label>
-          <button className="secondary-action" disabled={marketBusy} onClick={() => void sendDemoReceipt()}>{marketBusy ? "Sending demo receipt…" : activeIntent.receiptToken ? "Send another demo receipt" : "Send demo receipt"}</button>
+          <label className="receipt-email-row"><span>Receipt inbox<small>Send the email here, then download its original .eml file</small></span><input type="email" value={paymentEmail} onChange={(event) => changeReceiptEmail(event.target.value)} aria-label="Receipt destination email" /></label>
+          <button className="secondary-action" disabled={marketBusy} onClick={() => void sendDemoReceipt()}>{marketBusy ? "Sending receipt…" : activeIntent.receiptToken ? "Send another receipt" : "Send receipt"}</button>
           {activeIntent.receiptToken && <div className="intent-reference"><span>Receipt sent</span><b>{activeIntent.recipientEmail}</b><span>In Gmail, choose “Show original” → “Download original”, then select the .eml file below.</span></div>}
-          <label className="receipt-email-row receipt-source-row"><span>Original email file<small>Upload the unchanged .eml file downloaded from Gmail “Show original”.</small></span><input type="file" accept=".eml,message/rfc822" aria-label="Upload original demo receipt EML file" disabled={receiptFileBusy || marketBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectReceiptFile(file); }} /></label>
+          <label className="receipt-email-row receipt-source-row"><span>Original email file<small>Upload the unchanged .eml file downloaded from Gmail “Show original”.</small></span><input type="file" accept=".eml,message/rfc822" aria-label="Upload original receipt EML file" disabled={receiptFileBusy || marketBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectReceiptFile(file); }} /></label>
           {receiptFileName && <div className="intent-reference"><span>Original email selected</span><b>{receiptFileName}</b><span>The file will be checked without changing its original bytes.</span></div>}
           <button className="continue-button dialog-action" disabled={marketBusy || receiptFileBusy || !receiptEmailBase64 || !activeIntent.receiptToken || !activeIntent.recipientEmail} onClick={() => void submitDemoProof(receiptEmailBase64)}>{marketBusy ? "Verifying DKIM and submitting…" : receiptFileBusy ? "Reading .eml file…" : "Verify receipt and submit"}<ArrowRight size={16} /></button>
           <button className="secondary-action" disabled={marketBusy} onClick={() => void cancelTrade()}>Cancel reserved intent</button>
@@ -492,7 +492,7 @@ export default function Home() {
           <div className="secure-note"><ShieldCheck size={13} /> Without the saved buyer secret, the contract reservation cannot be proved or cancelled.</div>
         </> : <>
           <button className="continue-button dialog-action" disabled={marketBusy || !walletAddress || !marketSnapshot} onClick={() => void reserveTrade()}>{marketBusy ? "Waiting for Lace…" : walletAddress ? "Reserve with Lace" : "Connect Lace to continue"}<ArrowRight size={16} /></button>
-          <div className="secure-note"><CreditCard size={13} /> No external payment is made in this demo flow.</div>
+          <div className="secure-note"><CreditCard size={13} /> No external payment is made in this flow.</div>
         </>}
       </section></div>}
     </main>
