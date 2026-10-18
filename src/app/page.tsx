@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownUp,
@@ -27,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { listMidnightWallets, type ConnectedMidnightWallet, type MidnightWalletApi } from "@/lib/midnight-wallet";
-import { attestAndSubmitDemoPayment, cancelMarketIntent, clearSavedActiveIntent, formatTokenAmount, isReservedIntentBuyer, loadActiveIntent, MARKET_ADDRESS, NETWORK_ID, NETWORK_LABEL, paymentMinorFromDollars, quoteTokenAmount, readBuyerDemoTokenBalance, readMarket, reserveMarketIntent, updateSavedActiveIntent, type MarketSnapshot } from "@/lib/midnight-market";
+import { attestAndSubmitDemoPayment, cancelMarketIntent, clearSavedActiveIntent, formatTokenAmount, isReservedIntentBuyer, loadActiveIntent, MARKET_ADDRESS, NETWORK_ID, NETWORK_LABEL, paymentMinorFromDollars, quoteTokenAmount, readBuyerDemoTokenBalance, readMarket, reserveMarketIntent, updateSavedActiveIntent, type MarketSnapshot, type ZkStage } from "@/lib/midnight-market";
 import { WelcomeScreen } from "@/components/welcome-screen";
 
 type Offer = {
@@ -45,6 +45,7 @@ type Offer = {
 const demoOffer: Offer = { name: "Handshake maker", initials: "H", color: "mint", rail: "Gmail", rate: 1.006, available: 0, limit: "Loading on-chain limits", time: "Preview testnet", score: "On-chain" };
 
 const railMarks: Record<string, string> = { Zelle: "Z", Venmo: "v", PayPal: "P", CashApp: "$", Gmail: "G" };
+const zkProgressSteps = ["DKIM Verified", "Building ZK Proof", "Lace Approval", "Token Settlement"];
 
 function RailMark({ name, large = false }: { name: string; large?: boolean }) {
   return <span className={`rail-mark rail-${name.toLowerCase()}${large ? " rail-mark-large" : ""}`}>{railMarks[name] ?? name[0]}</span>;
@@ -87,6 +88,9 @@ export default function Home() {
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState("");
   const [marketBusy, setMarketBusy] = useState(false);
+  const [zkStage, setZkStage] = useState<ZkStage | null>(null);
+  const [zkElapsedSeconds, setZkElapsedSeconds] = useState(0);
+  const zkProofStartedAt = useRef<number | null>(null);
   const [activeIntent, setActiveIntent] = useState<ReturnType<typeof loadActiveIntent>>(null);
   const [receiptEmailBase64, setReceiptEmailBase64] = useState("");
   const [receiptFileName, setReceiptFileName] = useState("");
@@ -117,6 +121,16 @@ export default function Home() {
   const isConnectedBuyerOfReservedIntent = Boolean(
     walletAddress && marketSnapshot && isReservedIntentBuyer(marketSnapshot, walletAddress),
   );
+  const zkCurrentStep = zkStage === "validating_email" ? 0
+    : zkStage === "generating_witness" || zkStage === "synthesizing_proof" ? 1
+      : zkStage === "submitting_to_lace" ? 2
+        : zkStage === "confirmed" ? 3 : -1;
+  const zkStageMessage = zkStage === "validating_email" ? "Checking the reservation and verifying the original email."
+    : zkStage === "generating_witness" ? `Preparing the transaction witness${zkElapsedSeconds ? ` (${zkElapsedSeconds}s)` : "…"}`
+      : zkStage === "synthesizing_proof" ? `The proof server is building the ZK proof (${zkElapsedSeconds}s). This can take 10–25 seconds.`
+        : zkStage === "submitting_to_lace" ? "Review and approve the transaction in your Lace wallet."
+          : zkStage === "confirmed" ? "The transaction is confirmed and the contract released test tUSDC."
+            : "";
 
   const notify = (message: string) => {
     setToast(message);
@@ -127,6 +141,14 @@ export default function Home() {
     setActiveIntent(null);
     setMarketTxId("");
   }, []);
+
+  useEffect(() => {
+    if ((zkStage !== "generating_witness" && zkStage !== "synthesizing_proof") || zkProofStartedAt.current === null) return;
+    const updateElapsed = () => setZkElapsedSeconds(Math.floor((Date.now() - (zkProofStartedAt.current ?? Date.now())) / 1000));
+    updateElapsed();
+    const intervalId = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [zkStage]);
 
   useEffect(() => {
     if (!walletApi) {
@@ -279,8 +301,18 @@ export default function Home() {
     if (!walletApi) { setShowTrade(false); openWalletPicker(); return; }
     setMarketBusy(true);
     setMarketError("");
+    setZkStage("validating_email");
+    setZkElapsedSeconds(0);
+    zkProofStartedAt.current = null;
     try {
-      const result = await attestAndSubmitDemoPayment(walletApi, activeIntent, rawEmailBase64);
+      const result = await attestAndSubmitDemoPayment(walletApi, activeIntent, rawEmailBase64, (stage) => {
+        if (stage === "generating_witness" && zkProofStartedAt.current === null) zkProofStartedAt.current = Date.now();
+        if (stage === "confirmed" && zkProofStartedAt.current !== null) {
+          setZkElapsedSeconds(Math.floor((Date.now() - zkProofStartedAt.current) / 1000));
+          zkProofStartedAt.current = null;
+        }
+        setZkStage(stage);
+      });
       setActiveIntent(null);
       setReceiptEmailBase64("");
       setReceiptFileName("");
@@ -288,8 +320,17 @@ export default function Home() {
       notify("Proof accepted. Testnet tUSDC released to your Lace wallet.");
       await refreshMarket();
     } catch (error) {
+      setZkStage(null);
+      zkProofStartedAt.current = null;
       setMarketError(formatError(error));
     } finally { setMarketBusy(false); }
+  };
+
+  const closeTradeDialog = () => {
+    if (marketBusy) return;
+    setShowTrade(false);
+    setZkStage(null);
+    zkProofStartedAt.current = null;
   };
 
   const sendDemoReceipt = async () => {
@@ -466,8 +507,8 @@ export default function Home() {
 
       {toast && <div role="status" className="toast"><Check size={15} />{toast}</div>}
       {showWallet && <div className="modal-backdrop" onClick={() => setShowWallet(false)}><section className="dialog wallet-dialog" role="dialog" aria-modal="true" aria-labelledby="wallet-title" onClick={(event) => event.stopPropagation()}><button className="dialog-close" onClick={() => setShowWallet(false)} aria-label="Close"><X size={18} /></button><div className="dialog-icon"><Wallet size={21} /></div><div className="dialog-kicker">YOUR WALLET, YOUR KEYS</div><h2 id="wallet-title">Connect a Midnight wallet</h2><p>Connect Lace to Midnight {NETWORK_LABEL}. Select <b>Preview</b> in Lace. The app uses the Preview node and indexer, plus your local proof server at <b>127.0.0.1:6300</b>.</p>{walletOptions.length ? walletOptions.map((wallet, index) => <button key={`${wallet.name ?? "wallet"}-${index}`} className="wallet-option" disabled={walletBusy} onClick={() => void connectMidnightWallet(wallet)}><span className="wallet-option-icon"><Plus size={19} /></span><span><b>{wallet.name ?? `Midnight wallet ${index + 1}`}</b><small>{wallet.apiVersion ? `Connector API ${wallet.apiVersion} · ${NETWORK_LABEL}` : NETWORK_LABEL}</small></span><ArrowRight size={16} /></button>) : <div className="wallet-empty">No Midnight wallet detected. Install and unlock Lace, then refresh this page.</div>}{walletError && <p role="alert" className="checkout-error">{walletError}</p>}<div className="dialog-footnote"><LockKeyhole size={12} /> This app never receives your recovery phrase or private keys.</div></section></div>}
-      {showTrade && <div className="modal-backdrop" onClick={() => setShowTrade(false)}><section className="dialog trade-dialog" role="dialog" aria-modal="true" aria-labelledby="trade-title" onClick={(event) => event.stopPropagation()}>
-        <button className="dialog-close" onClick={() => setShowTrade(false)} aria-label="Close"><X size={18} /></button>
+      {showTrade && <div className="modal-backdrop" onClick={closeTradeDialog}><section className="dialog trade-dialog" role="dialog" aria-modal="true" aria-labelledby="trade-title" onClick={(event) => event.stopPropagation()}>
+        <button className="dialog-close" onClick={closeTradeDialog} aria-label="Close" disabled={marketBusy}><X size={18} /></button>
         <div className="dialog-icon"><Banknote size={21} /></div>
         <div className="dialog-kicker">{activeIntent ? "BUYER INTENT RESERVED" : `${NETWORK_LABEL.toUpperCase()} TRADE`}</div>
         <h2 id="trade-title">{activeIntent ? "Payment proof" : isConnectedBuyerOfReservedIntent ? "Recover reserved trade" : "Reserve this offer"}</h2>
@@ -477,13 +518,31 @@ export default function Home() {
         {activeIntent && <div className="intent-reference"><span>Trade reference</span><b>{activeIntent.tradeReference}</b><span>Buyer recovery data is saved for this wallet in this browser.</span></div>}
         {(marketError || walletError) && <p role="alert" className="checkout-error">{marketError || walletError}</p>}
         {marketTxId && <p className="chain-tx-note">Transaction submitted: {marketTxId}</p>}
+        {zkStage && <div className="zk-progress" role="region" aria-label="Payment proof progress" aria-busy={zkStage !== "confirmed"}>
+          <div className="zk-progress-status">
+            <span className={`zk-progress-status-icon${zkStage === "confirmed" ? " is-complete" : ""}`}>
+              {zkStage === "confirmed" ? <Check size={14} /> : <span className="zk-progress-spinner" />}
+            </span>
+            <span><b>{zkStage === "confirmed" ? "Settlement complete" : "Verifying and settling"}</b><small>{zkStageMessage}</small></span>
+          </div>
+          <ol className="zk-progress-steps">
+            {zkProgressSteps.map((step, index) => {
+              const complete = zkStage === "confirmed" || zkCurrentStep > index;
+              const current = zkStage !== "confirmed" && zkCurrentStep === index;
+              return <li key={step} className={complete ? "is-complete" : current ? "is-active" : ""} aria-current={current ? "step" : undefined}>
+                <span className="zk-progress-step-marker">{complete ? <Check size={12} /> : current ? <span className="zk-progress-spinner" /> : index + 1}</span>
+                <span>{step}</span>
+              </li>;
+            })}
+          </ol>
+        </div>}
         {activeIntent ? <>
           <label className="receipt-email-row"><span>Receipt inbox<small>Send the email here, then download its original .eml file</small></span><input type="email" value={paymentEmail} onChange={(event) => changeReceiptEmail(event.target.value)} aria-label="Receipt destination email" /></label>
           <button className="secondary-action" disabled={marketBusy} onClick={() => void sendDemoReceipt()}>{marketBusy ? "Sending receipt…" : activeIntent.receiptToken ? "Send another receipt" : "Send receipt"}</button>
           {activeIntent.receiptToken && <div className="intent-reference"><span>Receipt sent</span><b>{activeIntent.recipientEmail}</b><span>In Gmail, choose “Show original” → “Download original”, then select the .eml file below.</span></div>}
           <label className="receipt-email-row receipt-source-row"><span>Original email file<small>Upload the unchanged .eml file downloaded from Gmail “Show original”.</small></span><input type="file" accept=".eml,message/rfc822" aria-label="Upload original receipt EML file" disabled={receiptFileBusy || marketBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectReceiptFile(file); }} /></label>
           {receiptFileName && <div className="intent-reference"><span>Original email selected</span><b>{receiptFileName}</b><span>The file will be checked without changing its original bytes.</span></div>}
-          <button className="continue-button dialog-action" disabled={marketBusy || receiptFileBusy || !receiptEmailBase64 || !activeIntent.receiptToken || !activeIntent.recipientEmail} onClick={() => void submitDemoProof(receiptEmailBase64)}>{marketBusy ? "Verifying DKIM and submitting…" : receiptFileBusy ? "Reading .eml file…" : "Verify receipt and submit"}<ArrowRight size={16} /></button>
+          <button className="continue-button dialog-action" disabled={marketBusy || receiptFileBusy || !receiptEmailBase64 || !activeIntent.receiptToken || !activeIntent.recipientEmail} onClick={() => void submitDemoProof(receiptEmailBase64)}>{marketBusy ? "Processing payment proof…" : receiptFileBusy ? "Reading .eml file…" : "Verify receipt and submit"}<ArrowRight size={16} /></button>
           <button className="secondary-action" disabled={marketBusy} onClick={() => void cancelTrade()}>Cancel reserved intent</button>
           {marketError.includes("This saved intent is stale:") && <button className="secondary-action" disabled={marketBusy} onClick={discardStaleIntent}>Discard stale local intent</button>}
           <div className="secure-note"><ShieldCheck size={13} /> No payment was made. The backend verifies Gmail DKIM and the signed receipt claims.</div>

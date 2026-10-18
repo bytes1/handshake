@@ -62,6 +62,8 @@ type ConnectorConfig = {
   networkId?: string;
 };
 
+export type ZkStage = "validating_email" | "generating_witness" | "synthesizing_proof" | "submitting_to_lace" | "confirmed";
+
 type ActiveIntent = {
   contractAddress: string;
   takerSecret: string;
@@ -115,7 +117,7 @@ function privateStateProvider() {
   };
 }
 
-async function providers(wallet: ConnectedMidnightWallet) {
+async function providers(wallet: ConnectedMidnightWallet, onZkStage?: (stage: ZkStage) => void) {
   const config = await wallet.getConfiguration() as ConnectorConfig;
   if (config.networkId && config.networkId !== NETWORK_ID) {
     throw new Error(`Lace is connected to ${config.networkId}; choose ${NETWORK_LABEL} in Lace and reconnect.`);
@@ -128,29 +130,37 @@ async function providers(wallet: ConnectedMidnightWallet) {
     getCoinPublicKey: () => shielded.shieldedCoinPublicKey,
     getEncryptionPublicKey: () => shielded.shieldedEncryptionPublicKey,
     async balanceTx(tx: { serialize(): Uint8Array }) {
+      onZkStage?.("submitting_to_lace");
       const balanced = await wallet.balanceUnsealedTransaction(toHex(tx.serialize()));
       return Transaction.deserialize<SignatureEnabled, Proof, Binding>("signature", "proof", "binding", fromHex(balanced.tx));
     },
   };
   const midnightProvider = {
     async submitTx(tx: { serialize(): Uint8Array; identifiers(): string[] }) {
+      onZkStage?.("submitting_to_lace");
       await wallet.submitTransaction(toHex(tx.serialize()));
       return tx.identifiers()[0];
     },
+  };
+  const proofProvider = httpClientProofProvider(config.proverServerUri ?? PROOF_SERVER_URI, zkConfigProvider);
+  const proveTx = proofProvider.proveTx.bind(proofProvider);
+  proofProvider.proveTx = async (unprovenTx, partialProveTxConfig) => {
+    onZkStage?.("synthesizing_proof");
+    return proveTx(unprovenTx, partialProveTxConfig);
   };
   return {
     config,
     zkConfigProvider,
     publicDataProvider: indexerPublicDataProvider(config.indexerUri, config.indexerWsUri),
     privateStateProvider: privateStateProvider(),
-    proofProvider: httpClientProofProvider(config.proverServerUri ?? PROOF_SERVER_URI, zkConfigProvider),
+    proofProvider,
     walletProvider,
     midnightProvider,
   };
 }
 
-async function contractFor(wallet: ConnectedMidnightWallet) {
-  const p = await providers(wallet);
+async function contractFor(wallet: ConnectedMidnightWallet, onZkStage?: (stage: ZkStage) => void) {
+  const p = await providers(wallet, onZkStage);
   const compiled = CompiledContract.make("handshake-market", Market.Contract).pipe(
     CompiledContract.withVacantWitnesses,
     CompiledContract.withCompiledFileAssets(`${window.location.origin}${ARTIFACT_ROOT}`),
@@ -336,10 +346,16 @@ type AttestationResponse = {
   error?: string;
 };
 
-export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet, intent: ActiveIntent, rawEmailBase64: string) {
+export async function attestAndSubmitDemoPayment(
+  wallet: ConnectedMidnightWallet,
+  intent: ActiveIntent,
+  rawEmailBase64: string,
+  onZkStage?: (stage: ZkStage) => void,
+) {
+  onZkStage?.("validating_email");
   if (!rawEmailBase64) throw new Error("Upload the original Gmail .eml file to verify this receipt.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(intent.recipientEmail)) throw new Error("Send the receipt to a valid email address before uploading its .eml file.");
-  const { publicDataProvider, contract } = await contractFor(wallet);
+  const { publicDataProvider, contract } = await contractFor(wallet, onZkStage);
   if (!intent.buyerAddress) throw new Error("This saved reservation is missing its buyer wallet address.");
   const recipientKey = userAddressBytes(intent.buyerAddress).bytes;
   let ledger: any = null;
@@ -395,6 +411,7 @@ export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet
   const attestation = await response.json() as AttestationResponse;
   if (!response.ok) throw new Error(attestation.error ?? `Attester returned HTTP ${response.status}.`);
   if (!attestation.demoEvidence?.includes("GMAIL DKIM VERIFIED")) throw new Error("Attester did not return a Gmail-DKIM-verified receipt.");
+  onZkStage?.("generating_witness");
   const tx = await (contract as any).callTx.submitPaymentProof(
     bytesFromHex(intent.takerSecret),
     userAddressBytes(intent.buyerAddress),
@@ -408,6 +425,7 @@ export async function attestAndSubmitDemoPayment(wallet: ConnectedMidnightWallet
     BigInt(attestation.quotient),
     BigInt(attestation.challengeRemainder),
   );
+  onZkStage?.("confirmed");
   clearSavedActiveIntent(intent.buyerAddress);
   return { txId: tx.public.txId as string, evidence: attestation.demoEvidence };
 }
