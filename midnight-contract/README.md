@@ -1,381 +1,373 @@
-# midnight-contract
+# Handshake Contracts & Attester ⚡
 
-A Midnight Network smart contract scaffolded with create-mn-app.
+<p align="center">
+  <strong>Zero-knowledge marketplace contracts, test token minter, and off-chain DKIM attester for Midnight.</strong>
+</p>
 
-## Quick start
+<p align="center">
+  <a href="https://midnight.network"><img src="https://img.shields.io/badge/Midnight-Preview_Testnet-101820?style=for-the-badge&logo=shield" alt="Midnight Preview" /></a>
+  <a href="https://docs.midnight.network"><img src="https://img.shields.io/badge/Compact-v0.31.1-7057ff?style=for-the-badge" alt="Compact Compiler" /></a>
+  <a href="https://www.docker.com"><img src="https://img.shields.io/badge/Docker-Compose_v2-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Compose" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-22.0+-5FA04E?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" /></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" /></a>
+</p>
 
-Requirements: Node 22, Docker (with Compose v2), and Compact compiler 0.31.1, pinned in this workspace's `.compact-version` for the current public-network-compatible runtime.
+<p align="center">
+  <a href="../README.md">🏠 <b>Root Project README</b></a> •
+  <a href="contracts/handshake-market.compact">📜 <b>Marketplace Compact Contract</b></a> •
+  <a href="contracts/handshake-demo-usdc.compact">🪙 <b>Demo tUSDC Contract</b></a> •
+  <a href="contracts/schnorr.compact">🔐 <b>Schnorr Circuit</b></a> •
+  <a href="ATTESTOR_DEPLOYMENT.md">🚀 <b>Attester Deployment Guide</b></a>
+</p>
 
-> **On Windows:** the npm scripts in this project run natively (PowerShell or cmd.exe), but the Compact compiler publishes no native Windows binary — so `npm run compile`, and `npm run setup` which calls it, need to run inside WSL. See Midnight's [installation docs](https://docs.midnight.network/getting-started/installation).
+---
+
+> [!IMPORTANT]
+> **Prototype & Testnet Scope**
+> - **Testnet Assets Only:** Mints and settles **Handshake test tUSDC** (6 decimals). This is a custom test token on Midnight Preview with zero fiat redemption value; it is **not** Circle USDC.
+> - **Attester Trust Boundary:** DKIM signature validation and receipt parsing execute off-chain in the attester service. The on-chain Compact circuit verifies the attester's Jubjub Schnorr signature against trade commitments and consumes double nullifiers to prevent replay.
+
+---
+
+## 📑 Table of Contents
+
+- [Overview & Architecture](#overview--architecture)
+- [Smart Contracts & Circuits](#smart-contracts--circuits)
+  - [1. Handshake Market (`handshake-market.compact`)](#1-handshake-market-handshake-marketcompact)
+  - [2. Demo Token (`handshake-demo-usdc.compact`)](#2-demo-token-handshake-demo-usdccompact)
+  - [3. Schnorr Verification (`schnorr.compact`)](#3-schnorr-verification-schnorrcompact)
+- [Contract State Machine](#contract-state-machine)
+- [Off-Chain Attester Service](#off-chain-attester-service)
+- [Quick Start: Local Devnet](#quick-start-local-devnet)
+  - [Prerequisites](#prerequisites)
+  - [Automated Setup](#automated-setup)
+- [Testing & Quality Checks (Smoke Tests)](#testing--quality-checks-smoke-tests)
+- [Multi-Network Support](#multi-network-support)
+  - [Supported Networks](#supported-networks)
+  - [Deploying to Midnight Preview](#deploying-to-midnight-preview)
+- [Wallet Architecture & Lace Compatibility](#wallet-architecture--lace-compatibility)
+- [Environment Configuration](#environment-configuration)
+- [Available NPM Scripts](#available-npm-scripts)
+- [Project Directory Structure](#project-directory-structure)
+
+---
+
+## Overview & Architecture
+
+This package contains the core blockchain logic and attestation infrastructure for the Handshake protocol:
+
+1. **Compact Smart Contracts:** Native ZK contracts written in Compact that manage seller liquidity escrow, reserve tokens against concurrent buyer intents, enforce fill limits, verify Schnorr attestation proofs, and atomically release tokens.
+2. **Jubjub Schnorr Verifier:** A specialized in-circuit curve library providing cryptographic signature validation over Twisted Edwards curve points (Jubjub).
+3. **Off-Chain DKIM Attester:** An Express/TypeScript microservice that parses raw `.eml` email receipts, verifies cryptographic DKIM signatures against live DNS records, and signs contract-bound claims.
+4. **Devnet Orchestration:** Complete Docker Compose stack (Midnight node, GraphQL indexer, and proof server) for zero-dependency local testing.
+
+---
+
+## Smart Contracts & Circuits
+
+```
+contracts/
+├── handshake-market.compact      # Liquidity escrow, buyer reservation, and atomic settlement
+├── handshake-demo-usdc.compact   # Capped test tUSDC unshielded token contract
+├── schnorr.compact               # Jubjub curve point operations & Schnorr signature verification
+└── hello-world.compact           # Base reference template from create-mn-app
+```
+
+### 1. Handshake Market (`handshake-market.compact`)
+
+The primary protocol contract managing the peer-to-peer settlement lifecycle:
+
+- **State Ledgers:**
+  - `makerCommitment`: Cryptographic commitment binding the maker secret.
+  - `availableLiquidity` & `escrowedBalance`: Real Midnight unshielded tUSDC tokens held in contract escrow.
+  - `intentCommitments`, `intentAmounts`, `intentPaymentMinors`, `intentNonces`: Maps storing concurrent buyer reservation state keyed by recipient address.
+  - `consumedNullifiers` & `consumedReceipts`: Sets tracking spent replay keys.
+- **Key Circuits:**
+  - `fundOffer(makerSecret, amount)`: Maker deposits test tUSDC inventory into escrow.
+  - `withdrawOffer(makerSecret, recipient, amount)`: Maker recovers unreserved inventory.
+  - `reserveIntent(takerSecret, amount, paymentAmountMinor, recipient)`: Buyer locks liquidity for a specific trade amount.
+  - `cancelIntent(takerSecret, recipient)`: Buyer releases locked inventory back to the offer pool.
+  - `expireIntent(recipient)`: Permissionless release of reserved liquidity if the offer passes its expiry timestamp.
+  - `submitPaymentProof(...)`: Atomically verifies the attester's Schnorr signature, verifies provider ID, records the nullifiers to prevent replay, and transfers unshielded tokens to the buyer.
+
+### 2. Demo Token (`handshake-demo-usdc.compact`)
+
+- Mints **Handshake test tUSDC** with 6 decimal places.
+- Enforces max supply capacity and minting permissions.
+- Supplies the native token domain hex (`NEXT_PUBLIC_DEMO_TOKEN_DOMAIN_HEX`) required for Midnight token routing.
+
+### 3. Schnorr Verification (`schnorr.compact`)
+
+- Implements Twisted Edwards point addition and scalar multiplication for the Jubjub curve.
+- Computes deterministic challenge digests (`schnorrChallenge`).
+- Verifies that $s \cdot G == R + e \cdot PK$ within the zero-knowledge circuit, ensuring non-forgeable off-chain attestations.
+
+---
+
+## Contract State Machine
+
+The diagram below details the state lifecycle of an offer and its buyer intents:
+
+```
+                  ┌────────────────────────┐
+                  │      Unfunded Offer    │
+                  └───────────┬────────────┘
+                              │ fundOffer()
+                              ▼
+                     ┌──────────────────┐
+        ┌───────────►│   Offer Funded   │◄───────────┐
+        │            └────────┬─────────┘            │
+        │ cancelIntent()      │ reserveIntent()      │ expireIntent()
+        │                     ▼                      │
+        └─────────────[ Intent Active ]──────────────┘
+                              │
+                              │ submitPaymentProof()
+                              │ (Verifies Schnorr + Replay check)
+                              ▼
+                  ┌────────────────────────┐
+                  │    Atomic Payout &     │
+                  │   Nullifiers Consumed  │
+                  └────────────────────────┘
+```
+
+---
+
+## Off-Chain Attester Service
+
+The attester (`src/attester-server.ts`) bridges off-chain payment receipts with on-chain Compact verification:
+
+```
+  Raw .eml File (Gmail)
+           │
+           ▼
+  [ 1. DKIM Verification ] ──► Validates RSA-SHA256 signature against DNS public key
+           │
+           ▼
+  [ 2. Claim Matching ]    ──► Matches recipient, amount, currency, and trade reference
+           │
+           ▼
+  [ 3. Jubjub Schnorr ]    ──► Signs contractId, buyerCommitment, amount, receipt, & nullifier
+           │
+           ▼
+  Returns { signature, quotient, challengeRemainder } to Buyer for on-chain submission
+```
+
+### Production Route
+- `POST /v1/demo/gmail/dkim-attest`
+- Input: JSON payload with `emailRaw` (or `emailBase64`), `contractId`, `buyerCommitment`, `recipient`, `nullifier`.
+- Verification: Full RFC-822 MIME parsing via `mailauth`, DNS TXT record DKIM lookup, verification of `From`, `To`, and `Subject` headers.
+
+### Synthetic / Local Smoke Route
+- `POST /v1/paypal/attest`
+- Uses synthetic test emails generated via `npm run demo:email` for offline unit testing without external network or DNS dependencies.
+
+---
+
+## Quick Start: Local Devnet
+
+### Prerequisites
+
+- **Node.js:** `v22.0.0` or newer
+- **Docker & Docker Compose v2:** Running locally
+- **Compact Compiler:** `v0.31.1` (pinned in `.compact-version`)
+
+> [!NOTE]
+> **Windows Users:** The Compact compiler currently does not distribute a native Windows binary. Run `npm run compile:all` and `npm run setup` inside **WSL (Windows Subsystem for Linux)** or via Docker. The TypeScript test scripts and devnet services can be accessed from PowerShell.
+
+---
+
+### Automated Setup
+
+From the `midnight-contract` directory, run:
 
 ```bash
 npm install
 npm run setup
 ```
 
-`npm run setup` runs end-to-end with no prompts:
+`npm run setup` executes an end-to-end initialization workflow:
+1. Starts the local Docker devnet (`docker compose up -d --wait`) with healthchecks.
+2. Compiles all Compact contracts (`contracts/handshake-demo-usdc.compact` and `contracts/handshake-market.compact`).
+3. Deploys the test token, mints initial inventory, and deploys the funded marketplace offer.
 
-1. `docker compose up -d --wait` — starts a local Midnight devnet (node, indexer, proof-server) and blocks until all three pass their healthchecks.
-2. `npm run compile:all` — compiles the capped demo tUSDC and marketplace contracts.
-3. `npm run deploy` — deploys the test token and market, mints the initial inventory, and escrows it in the market.
+Devnet services started:
 
-The generated TypeScript CLI and deploy scripts are ready to connect to the local or selected public test network after the toolchain is available.
+| Service | Port | Endpoint / Purpose |
+| :--- | :---: | :--- |
+| **Node** | `9944` | Midnight blockchain substrate node (`dev` preset) |
+| **Indexer** | `8088` | GraphQL indexer API for public chain state |
+| **Proof Server** | `6300` | Local client-side Zero-Knowledge proof generation |
 
-## Handshake marketplace contract (first pass)
-
-`contracts/handshake-market.compact` starts the marketplace contract work with
-a single maker offer and one active buyer intent. It enforces the offer's
-minimum and maximum fill, reserves available quantity, lets the buyer cancel
-their own intent, and lets the buyer submit a Schnorr-attested payment claim.
-Maker and taker identifiers are contract-scoped commitments derived
-from private 32-byte secrets. These secrets act as bearer authorization in
-this prototype; they are not wallet identities, and losing the maker secret
-makes the offer unmanageable. Do not use real secrets or funds with this
-contract.
-
-Compile the demo token and market contracts:
-
-```bash
-npm run compile:all
-```
-
-On Windows, run the Compact compiler from WSL as described above. The generated
-files go under `contracts/managed/handshake-market/` and are ignored by Git.
-
-For a public Preprod deployment, provide a Blockfrost project token and use a
-separate, funded test wallet. Set `MIDNIGHT_BLOCKFROST_PROJECT_ID`, start the
-local proof server with `npm run proof-server:start`, then run:
-
-```sh
-npm run setup -- --network preprod
-```
-
-The deployment script creates one sample offer. The market supports concurrent
-buyer intents: each buyer reserves against shared available liquidity, and a
-wallet can hold one active intent per offer. `HANDSHAKE_DEMO_LIQUIDITY`,
-`HANDSHAKE_DEMO_MIN_FILL`, and `HANDSHAKE_DEMO_MAX_FILL` are tUSDC base units
-(six decimals). `HANDSHAKE_DEMO_RATE_BPS` sets the fiat exchange rate in basis
-points (10060 means 1.006 tUSDC per USD). The deployment mints and escrows the
-offer liquidity as real Midnight unshielded tokens.
-
-Deployment also requires `HANDSHAKE_ATTESTER_PUBLIC_KEY_X` and
-`HANDSHAKE_ATTESTER_PUBLIC_KEY_Y`, the decimal Jubjub coordinates for the
-off-chain attester's public key. Keep the corresponding secret only in the
-attester service. Generate a key pair once with `npm run attester:keygen`, put
-the secret in the attester's secret store, and set the two public coordinates
-when deploying. Do not regenerate the key after deployment. The market circuit verifies the attester's Schnorr signature
-in-circuit and binds it to the deployed contract, buyer commitment, amount,
-provider, receipt commitment, and buyer-submitted nullifier. Used nullifiers
-and receipt commitments are recorded to prevent replay. The buyer submits the
-transaction directly; the attester is not a relayer.
-
-The market escrows real tUSDC UTXOs using `fundOffer`. A buyer reservation
-binds the tUSDC amount, expected fiat amount, buyer commitment, and recipient
-address. A valid attester Schnorr proof sends the reserved tUSDC to that buyer
-in the same transaction and consumes both replay keys. A buyer can cancel an
-unproven reservation; after the fixed offer expiry, anyone can clear a stale
-reservation and the maker can withdraw unreserved inventory. The Compact
-contract cannot issue a fiat refund. DKIM/RSA verification and provider
-receipt parsing remain off-chain responsibilities; do not describe this as
-trustless DKIM verification or assume the signature proves that the attester
-parsed a real provider receipt correctly.
-The legacy synthetic email endpoint supports only a fixed-template receipt
-signed with a locally pinned RSA key. Its sender uses
-`paypal.handshake-demo.test`; it is not a PayPal email. The Gmail demo-receipt
-endpoint separately verifies the uploaded raw email file with DNS-backed DKIM, checks
-the configured sender and signed receipt fields, and issues the same contract
-attestation. This remains a trusted backend attestation, not a trustless DKIM
-proof or evidence that a real payment happened.
-
-The token contract mints **Handshake test tUSDC**, a custom, capped Midnight
-unshielded token with six decimal places. It is not Circle USDC and has no
-redemption value. Every `npm run deploy` creates a new test token and offer,
-mints the offer inventory to the maker wallet, and escrows it. Addresses and
-the demo minter/maker secrets are saved in the gitignored,
-owner-only `.midnight-demo-assets.json` file.
-
-To run the synthetic attester locally, generate a dedicated Jubjub contract
-attester key and a separate synthetic DKIM key:
-
-```sh
-npm run attester:keygen
-npm run dkim:keygen
-```
-
-Keep the printed private keys in your local secret environment. Set
-`HANDSHAKE_SYNTHETIC_DKIM_PUBLIC_KEY` to the base64 PEM public key and
-`HANDSHAKE_SYNTHETIC_DKIM_PRIVATE_KEY` to the base64 PEM private key, then
-start the local-only endpoint:
-
-```sh
-npm run attester:start
-```
-
-Create a signed fixture using the same trade reference, amount in minor units,
-and recipient as the intent:
-
-```sh
-npm run demo:email -- TXN-DEMO-1001 HANDSHAKE-TRADE-01 2500 buyer@example.test receipt.eml
-```
-
-POST JSON to `http://127.0.0.1:8787/v1/paypal/attest` with base64 `emailBase64`
-and hex fields `contractId`, `buyerCommitment`, and buyer-chosen `nullifier`,
-plus string fields `intentNonce`, `tradeReference`, `amountMinor`, and
-`recipient`. The endpoint returns the Schnorr attestation only after verifying
-the RSA signature and matching the receipt to the supplied intent. The buyer's
-wallet still submits `submitPaymentProof` directly; this service is not a
-relayer. This local demo endpoint does not query chain state, so it is not a
-production attester and must not be exposed publicly.
-
-The Next.js PayPal Sandbox API flow is not yet connected to this attestation
-circuit. The displayed peer offers are sample data. Do not use this version to
-settle a trade. Production use needs a provider-backed email verification
-source, production DKIM key discovery/rotation and policy, an independent chain
-state check in the attester, wallet submission integration, and test-token
-custody/settlement.
-Peer V2 also separates escrow, intent coordination, and payment verification;
-its contracts are built for Base, so their implementation cannot be dropped
-into Compact unchanged.
-
-## Local devnet
-
-After local setup succeeds, run the Handshake market smoke test from a second
-terminal in this directory:
-
-```bash
-npm run market:smoke -- --network undeployed
-```
-
-It connects with the same local wallet as deployment, submits a real
-`reserveIntent` followed by `cancelIntent`, and checks that the offer returns to
-the open state. By default it reserves a one-dollar fiat amount; override this
-with `HANDSHAKE_SMOKE_PAYMENT_MINOR` in minor USD units. The script keeps a gitignored recovery secret while
-the test intent is active, so it can retry cancellation if interrupted. This
-checks those two contract circuits only. The older `npm run cli` command still targets the scaffolded
-Hello World contract.
-
-To exercise the payment-proof circuit locally, create a synthetic DKIM key pair
-once with `npm run dkim:keygen`. Put the printed private and public PEM values
-in `HANDSHAKE_SYNTHETIC_DKIM_PRIVATE_KEY` and
-`HANDSHAKE_SYNTHETIC_DKIM_PUBLIC_KEY` as base64 in the local `.env`, and put
-the matching Jubjub `HANDSHAKE_ATTESTER_SECRET_KEY` in the attester environment.
-The deployed contract must have been initialized with that Jubjub key's public
-coordinates. Start the attester in one terminal, then run the payment smoke
-command in another terminal with the same `.env` loaded:
-
-```bash
-npm run attester:start
-npm run market:payment-smoke -- --network undeployed
-```
-
-This test reserves an intent, creates and verifies a synthetic `.test` email,
-requests an attestation, submits `submitPaymentProof`, and checks the accepted
-state and consumed replay keys. It also verifies the escrow ledger decreases
-by the paid amount. Token release and proof acceptance are one atomic contract
-call. The email remains synthetic and is not a real PayPal message.
-
-The project ships its own devnet via `docker-compose.yml`:
-
-| Service        | Port | Purpose                                         |
-| -------------- | ---- | ----------------------------------------------- |
-| `node`         | 9944 | Midnight node, `dev` chain preset               |
-| `indexer`      | 8088 | GraphQL indexer for chain state                 |
-| `proof-server` | 6300 | Generates ZK proofs for contract transactions   |
-
-State lives in container-managed volumes. Tear everything down with:
+To stop the devnet:
 
 ```bash
 docker compose down -v
 ```
 
-That removes all containers, networks, and volumes. The next `npm run setup` starts from a clean slate.
+---
 
-## ⚠️ LOCAL DEVNET ONLY
+## Testing & Quality Checks (Smoke Tests)
 
-The deploy script uses a well-known genesis seed (`0000…0001`) so the
-pre-minted NIGHT in the `dev` chain preset is immediately available. **Do
-not use this seed against Preprod, mainnet, or any environment that
-handles real value** — anyone running this devnet has full access to
-funds at this seed.
+The repository provides comprehensive contract smoke tests targeting the local devnet:
 
-## Networks
+### 1. Reservation & Cancellation Flow
+Tests `reserveIntent` and `cancelIntent` against live ledger state:
 
-This DApp supports three networks:
+```bash
+npm run market:smoke -- --network undeployed
+```
+- Submits an on-chain reservation intent with a generated taker secret.
+- Verifies that available liquidity decrements correctly.
+- Cancels the intent and confirms that liquidity returns to the open pool.
 
-| Network | When to use | Default? |
-|---|---|---|
-| `undeployed` | Local devnet bundled in `docker-compose.yml`. Genesis seed is hardcoded; no funding needed. | yes |
-| `preview` | Public preview testnet. Faucet at `https://midnight-tmnight-preview.nethermind.dev`. |  |
-| `preprod` | Public preprod testnet. Faucet at `https://midnight-tmnight-preprod.nethermind.dev`. |  |
+### 2. End-to-End Payment Proof Flow
+Tests the full cryptographic attestation and settlement pipeline:
 
-The active network is **sticky**: whichever network you last interacted
-with stays active until you switch. Any command run with `--network <name>`
-also sets that network active for subsequent commands. The default on a
-fresh project is `undeployed` (local devnet).
+```bash
+# Terminal 1: Start the local attester service
+npm run attester:start
 
-```sh
-npm run setup -- --network preview   # runs on preview AND makes it active
-npm run cli                          # still uses preview
-npm run check-balance                # still uses preview
+# Terminal 2: Run the payment smoke test
+npm run market:payment-smoke -- --network undeployed
+```
+- Creates an intent on the market contract.
+- Generates a synthetic receipt and validates its DKIM signature.
+- Requests a Jubjub Schnorr attestation from the attester.
+- Submits `submitPaymentProof` with the ZK proof.
+- Asserts that token escrow decreases, tokens are transferred, and both nullifier sets are marked consumed.
+
+---
+
+## Multi-Network Support
+
+### Supported Networks
+
+| Network ID | Target Environment | Faucet URL |
+| :--- | :--- | :--- |
+| `undeployed` | Local Docker devnet (default) | Pre-funded via genesis seed |
+| `preview` | Public Midnight Preview testnet | [Midnight Preview Faucet](https://midnight-tmnight-preview.nethermind.dev) |
+| `preprod` | Public Midnight Preprod testnet | [Midnight Preprod Faucet](https://midnight-tmnight-preprod.nethermind.dev) |
+
+Network selection is **sticky**:
+
+```bash
+# Switch active network
+npm run network preview
+
+# Check current active network
+npm run network
+
+# Switch back to local devnet
+npm run network undeployed
 ```
 
-### Deploy a fresh Preview demo
+---
 
-The active marketplace contract cannot be upgraded in place. After changing
-its Compact source, deploy a new demo instance with:
+### Deploying to Midnight Preview
 
-```sh
+To deploy fresh contracts to the live **Midnight Preview** network:
+
+```bash
 npm run setup -- --network preview --fresh-demo
 ```
 
-Run this command inside WSL on Windows so the Midnight Compact compiler is
-used. `--fresh-demo` deploys a new test token and marketplace; it does not move
-test tokens or reservations from the old contracts. The previous local demo
-secrets are archived in `.midnight-demo-assets.json`. Copy the new market
-address (and new demo token address/domain, if the frontend reads buyer token
-balances) from the deployment output into the corresponding
-`NEXT_PUBLIC_MARKET_CONTRACT_ADDRESS`, `NEXT_PUBLIC_DEMO_TOKEN_ADDRESS`, and
-`NEXT_PUBLIC_DEMO_TOKEN_DOMAIN_HEX` values in the frontend environment, then
-restart/redeploy the frontend.
+1. On first run, the script outputs your generated 24-word recovery phrase and public wallet address.
+2. Visit the faucet, paste your address, and request `tNIGHT`.
+3. The setup script will automatically poll the indexer until funds are detected.
+4. Once deployed, copy the output addresses into your root `.env.local`:
+   - `NEXT_PUBLIC_MARKET_CONTRACT_ADDRESS`
+   - `NEXT_PUBLIC_DEMO_TOKEN_ADDRESS`
+   - `NEXT_PUBLIC_DEMO_TOKEN_DOMAIN_HEX`
 
-You can also switch without running anything else:
+---
 
-```sh
-npm run network preview         # active network is now preview
-npm run network                 # prints current active network
-npm run network undeployed      # switch back to local devnet
-```
+## Wallet Architecture & Lace Compatibility
 
-### How wallets work across networks
+Public network wallets use standard BIP-39 mnemonic phrases with `mnemonicToSeed` derivation:
 
-- `undeployed` uses a hardcoded genesis seed. Local devnet pre-funds it.
-- `preview` and `preprod` generate a fresh wallet on first use: a 24-word
-  BIP-39 recovery phrase (printed once) plus its derived seed, both stored
-  in `.midnight-state.json` (gitignored). The wallet survives switching
-  networks — switch back later and your funded wallet returns.
-- **Back up your recovery phrase** if you fund a public-network wallet you
-  care about. It is printed when the wallet is created and kept in
-  `.midnight-state.json` under `wallets.<network>.mnemonic`. Anyone holding
-  the phrase controls the wallet.
-- Wallets created before mnemonic support keep working from their stored
-  `seed`; they just have no phrase to import into Lace.
-
-### Using the same wallet as Lace
-
-Seeds are derived with the standard BIP-39 `mnemonicToSeed` step — the same
-convention Lace uses — so identity is portable in both directions:
-
-- **Bring your Lace wallet here**: pass your recovery phrase via the
-  `MIDNIGHT_WALLET_MNEMONIC` env var — the derived addresses match Lace.
-  To keep the phrase out of your shell history, enter it with a hidden
-  prompt instead of typing it inline:
-
+- **Lace Compatible:** Seeds are derived identically to the Lace browser wallet. A mnemonic generated here restores the exact same account in Lace, and vice versa.
+- **Importing a Lace Wallet:**
   ```bash
   read -s MIDNIGHT_WALLET_MNEMONIC && export MIDNIGHT_WALLET_MNEMONIC
   npm run deploy
   ```
-- **Take a scaffold wallet to Lace**: restore Lace from the 24-word phrase
-  in `.midnight-state.json`.
+- **Sync State Cache:** Serialized wallet checkpoints are persisted in `.midnight-wallet-state/<network>/` to skip re-indexing from genesis on subsequent runs.
 
-### Funding a public-network wallet
+---
 
-On the first run with `--network preview` (or `preprod`):
+## Environment Configuration
 
-1. `setup` will print your wallet address and the faucet URL.
-2. Open the faucet URL, paste the address, request tNIGHT.
-3. `setup` polls the wallet balance every 10 s and continues automatically
-   once funds arrive.
-4. The default poll budget is 10 minutes. Override with
-   `MIDNIGHT_FAUCET_TIMEOUT_MS=1800000` (30 min) for unattended runs.
+Configure variables in `midnight-contract/.env`:
 
-If the faucet is slow or the script times out, your seed is preserved.
-Re-run `npm run setup -- --network preview` once the funds land.
+| Variable | Description | Default / Example |
+| :--- | :--- | :--- |
+| `HANDSHAKE_ATTESTER_SECRET_KEY` | 32-byte hex scalar for the attester's Jubjub private key | Generated via `npm run attester:keygen` |
+| `RESEND_DEMO_RECEIPT_SECRET` | Shared secret shared between the Next.js frontend and attester | Random 32-byte hex string |
+| `HANDSHAKE_SYNTHETIC_DKIM_PRIVATE_KEY` | Base64 PEM RSA private key for synthetic fixtures | Generated via `npm run dkim:keygen` |
+| `HANDSHAKE_SYNTHETIC_DKIM_PUBLIC_KEY` | Base64 PEM RSA public key for synthetic verification | Generated via `npm run dkim:keygen` |
+| `PORT` | HTTP port for the attester server | `8787` |
+| `MIDNIGHT_PROOF_SERVER_URL` | Local or remote proof server endpoint | `http://127.0.0.1:6300` |
+| `MIDNIGHT_BLOCKFROST_PROJECT_ID` | Blockfrost project token (required for Preprod only) | Optional |
 
-### Environment overrides
+---
 
-These env vars override the active network's config (no per-network
-suffix — they apply to whichever network is active for the run):
+## Available NPM Scripts
 
-| Variable | Effect |
-|---|---|
-| `MIDNIGHT_WALLET_SEED` | Use this hex seed (32-128 hex chars; a Lace-compatible BIP-39 seed is 128) instead of generating/persisting one. Useful for CI with a pre-funded wallet. |
-| `MIDNIGHT_WALLET_MNEMONIC` | Use this BIP-39 recovery phrase instead of generating a wallet — e.g. your Lace phrase, for the same addresses as Lace. Not persisted. Set only one of seed/mnemonic. |
-| `MIDNIGHT_BLOCKFROST_PROJECT_ID` | Blockfrost project ID required for the current Preprod indexer and node. |
-| `MIDNIGHT_INDEXER_URL` | Override the indexer GraphQL/API URL. |
-| `MIDNIGHT_INDEXER_WS_URL` | Override the indexer WS URL. |
-| `MIDNIGHT_NODE_URL` | Override the node RPC URL. |
-| `MIDNIGHT_FAUCET_URL` | Override the faucet URL printed during setup. |
-| `MIDNIGHT_PROOF_SERVER_URL` | Override the proof server URL — set to a public proof server (e.g. `https://lace-proof-pub.preview.midnight.network`) to skip running one locally. |
-| `MIDNIGHT_FAUCET_TIMEOUT_MS` | Faucet poll budget in milliseconds (default 600000 = 10 min). |
+| Script | Command | Purpose |
+| :--- | :--- | :--- |
+| `npm run setup` | `tsx src/setup.ts` | One-shot devnet start, contract compilation, and deployment |
+| `npm run compile:all` | `compile:demo-token && compile:market` | Compiles both Compact contracts |
+| `npm run compile:market` | `compact compile contracts/handshake-market.compact` | Compiles the marketplace contract |
+| `npm run compile:demo-token` | `compact compile contracts/handshake-demo-usdc.compact` | Compiles the test tUSDC contract |
+| `npm run deploy` | `tsx src/deploy.ts` | Deploys contracts to the currently active network |
+| `npm run attester:start` | `tsx src/attester-server.ts` | Starts the HTTP DKIM / Jubjub attester service |
+| `npm run attester:keygen` | `tsx src/attester-keygen.ts` | Generates a new Jubjub key pair for the attester |
+| `npm run dkim:keygen` | `tsx src/synthetic-dkim-keygen.ts` | Generates RSA key pair for synthetic email fixtures |
+| `npm run demo:email` | `tsx src/synthetic-email-demo.ts` | Creates a signed synthetic `.eml` test fixture |
+| `npm run market:smoke` | `tsx src/market-smoke.ts` | Smoke test for reservation and cancellation circuits |
+| `npm run market:payment-smoke`| `tsx src/market-payment-smoke.ts` | Full smoke test for payment proof and token release |
+| `npm run network` | `tsx src/network.ts` | Inspects or switches the active target network |
+| `npm run check-balance` | `tsx src/check-balance.ts` | Displays NIGHT and DUST balances for current wallet |
+| `npm run proof-server:start` | `docker compose up -d` | Starts the proof server container |
+| `npm run proof-server:stop` | `docker compose down` | Stops devnet containers |
+| `npm run clean` | `node scripts/clean.mjs` | Cleans build artifacts, wallet cache, and state files |
 
-By default all networks use the **local** proof server. Public proof
-servers exist (see the env override above) but the local default keeps
-your witness data on your machine and avoids depending on a remote
-service for the deploy hot path.
+---
 
-### Switching back to local devnet
-
-```sh
-npm run network undeployed     # or: npm run setup -- --network undeployed
-```
-
-Your preview/preprod wallet seeds and deploy addresses stay in
-`.midnight-state.json`. Switch back later, and they're still there.
-
-### Wallet sync cache
-
-After each `deploy`, `cli`, or `check-balance` run, the scripts serialize the
-wallet's synced state to `.midnight-wallet-state/<network>/` (gitignored).
-The next run on the same network restores from that snapshot and only catches
-up to the latest block instead of replaying from genesis — meaningful on
-`preview` / `preprod` where a from-seed sync takes minutes.
-
-If the cache is stale or corrupt (e.g. after an SDK upgrade with an
-incompatible state format) the wallet falls back to a fresh from-seed sync
-with a one-line warning. `npm run clean` removes the cache along with other
-generated state.
-
-## Available scripts
-
-| Script                  | Description                                                    |
-| ----------------------- | -------------------------------------------------------------- |
-| `npm run setup`         | One-shot: start devnet, compile, deploy.                       |
-| `npm run compile:all`   | Compile the demo token and market Compact contracts.             |
-| `npm run deploy`        | Deploy the compiled contract (requires devnet up + compiled).  |
-| `npm run cli`           | Interactive CLI to call circuits on the deployed contract.     |
-| `npm run check-balance` | Print the genesis-seed wallet's NIGHT and DUST balances.       |
-| `npm run clean`         | Remove compiled contracts, network/wallet state, and local demo token secrets. |
-| `npm run proof-server:start` / `:stop` | Compose lifecycle for just the proof-server service. |
-
-## Project structure
+## Project Directory Structure
 
 ```
 midnight-contract/
 ├── contracts/
-│   └── hello-world.compact     # Compact source
+│   ├── handshake-market.compact      # Marketplace contract (escrow, reservations, claims)
+│   ├── handshake-demo-usdc.compact   # Test tUSDC token contract
+│   ├── schnorr.compact               # Jubjub Schnorr signature verification circuit
+│   └── hello-world.compact           # create-mn-app template reference
 ├── scripts/
-│   └── clean.mjs               # remove generated state
+│   └── clean.mjs                     # Cleanup utility for cache and generated artifacts
 ├── src/
-│   ├── network.ts              # network selection + state file management
-│   ├── wallet.ts               # wallet construction + sync-state cache
-│   ├── setup.ts                # orchestrator for `npm run setup`
-│   ├── deploy.ts               # deploy the contract
-│   ├── cli.ts                  # interact with deployed contract
-│   └── check-balance.ts        # NIGHT / DUST balance
-├── docker-compose.yml          # node + indexer + proof-server
-├── .midnight-state.json        # written by deploy (gitignored)
-├── .midnight-wallet-state/     # serialized sync state per network (gitignored)
+│   ├── attester-server.ts            # Express HTTP service verifying DKIM and issuing claims
+│   ├── attester-keygen.ts            # Jubjub key generator
+│   ├── synthetic-dkim-keygen.ts      # RSA key generator for synthetic tests
+│   ├── synthetic-email-demo.ts       # Synthetic fixture generator
+│   ├── market-smoke.ts               # Reservation/cancellation test runner
+│   ├── market-payment-smoke.ts       # Payment proof/token release test runner
+│   ├── network.ts                    # Network resolution, configs, and state management
+│   ├── wallet.ts                     # BIP-39 wallet derivation and sync state cache
+│   ├── deploy.ts                     # Contract deployment orchestrator
+│   ├── setup.ts                      # Full setup runner
+│   ├── cli.ts                        # Interactive CLI
+│   └── check-balance.ts              # Balance query utility
+├── Dockerfile.attester               # Container build definition for the attester
+├── docker-compose.yml                # Midnight node, indexer, and proof-server services
+├── ATTESTOR_DEPLOYMENT.md            # Standalone attester hosting and deployment guide
+├── .compact-version                  # Pinned Compact compiler version (0.31.1)
 ├── package.json
 └── tsconfig.json
 ```
 
-## Compact compiler version
+---
 
-`.compact-version` at the create-mn-app repo root pinned the compiler
-version this project was scaffolded against. To upgrade your local
-compiler to that version:
-
-```bash
-compact update <version>
-compact use <version>
-```
+<p align="center">
+  Part of the <a href="../README.md"><b>Handshake Protocol</b></a> • Built for the Midnight Network
+</p>

@@ -41,3 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .devcontainer/certs/*.crt
+
+# Files
+changes.md
+akindo.md
