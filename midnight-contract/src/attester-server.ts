@@ -17,6 +17,7 @@ const trustProxy = process.env.HANDSHAKE_ATTESTER_TRUST_PROXY === '1';
 const allowedOrigins = new Set((process.env.HANDSHAKE_ATTESTER_ALLOWED_ORIGINS ??
   (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
   .split(',').map((value) => value.trim()).filter(Boolean));
+const allowAnyOrigin = allowedOrigins.has('*');
 
 function validateConfiguration() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port.');
@@ -24,7 +25,7 @@ function validateConfiguration() {
     throw new Error('HANDSHAKE_ATTESTER_RATE_LIMIT_PER_MINUTE must be a positive integer.');
   }
   if (process.env.NODE_ENV === 'production' && allowedOrigins.size === 0) {
-    throw new Error('Set HANDSHAKE_ATTESTER_ALLOWED_ORIGINS to the exact HTTPS frontend origins.');
+    throw new Error('Set HANDSHAKE_ATTESTER_ALLOWED_ORIGINS to the HTTPS frontend origins or *.');
   }
   const receiptSecret = process.env.RESEND_DEMO_RECEIPT_SECRET;
   if (!receiptSecret || receiptSecret.length < 32) throw new Error('RESEND_DEMO_RECEIPT_SECRET must be at least 32 characters.');
@@ -77,11 +78,11 @@ const server = createServer(async (request, response) => {
   response.setHeader('vary', 'Origin');
   const origin = request.headers.origin;
   if (origin) {
-    if (!allowedOrigins.has(origin)) {
+    if (!allowAnyOrigin && !allowedOrigins.has(origin)) {
       response.writeHead(403).end(JSON.stringify({ error: 'This frontend origin is not allowed to use the attester.' }));
       return;
     }
-    response.setHeader('access-control-allow-origin', origin);
+    response.setHeader('access-control-allow-origin', allowAnyOrigin ? '*' : origin);
     response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
     response.setHeader('access-control-allow-headers', 'content-type');
     response.setHeader('access-control-max-age', '600');

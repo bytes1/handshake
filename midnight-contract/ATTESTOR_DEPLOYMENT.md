@@ -30,7 +30,7 @@ Set these environment variables in the host's secret/environment settings:
 | `NODE_ENV` | `production` |
 | `HANDSHAKE_ATTESTER_HOST` | `0.0.0.0` |
 | `PORT` | The port supplied by the host (often injected automatically) |
-| `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS` | Comma-separated exact frontend origins, such as `https://app.example.com`; no path or trailing slash |
+| `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS` | Comma-separated frontend origins, such as `https://app.example.com`; no path or trailing slash. Use `*` to allow every browser origin. |
 | `HANDSHAKE_ATTESTER_SECRET_KEY` | The private signing key whose public key is configured in the deployed marketplace contract |
 | `RESEND_DEMO_RECEIPT_SECRET` | The same random secret used by the frontend receipt-sending API |
 | `HANDSHAKE_DEMO_RECEIPT_FROM` | The Gmail sender address used for the demo receipt |
@@ -41,7 +41,7 @@ The frontend also sends demo receipt email. Configure its server-side Gmail SMTP
 
 Use the existing attester key that matches the contract's configured public key. Generating a different key without updating and redeploying the contract causes on-chain verification to fail. The frontend's `NEXT_PUBLIC_ATTESTER_URL` is the only public attestor setting.
 
-Configure the host health check as `GET /healthz`. Restrict CORS to the actual frontend origin(s). CORS only limits browser origins; it does not authenticate callers. The built-in rate limit is per-process memory, so enable the hosting provider's edge rate limiting for a public deployment with multiple replicas. The `.eml` contents are sent to this service for verification; deploy it only where you are comfortable processing the receipt email data.
+Configure the host health check as `GET /healthz`. Prefer allowing only the actual frontend origin(s); set `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS=*` to allow every browser origin. CORS only limits browser origins; it does not authenticate callers. The built-in rate limit is per-process memory, so enable the hosting provider's edge rate limiting for a public deployment with multiple replicas. The `.eml` contents are sent to this service for verification; deploy it only where you are comfortable processing the receipt email data.
 
 ## Frontend setup
 
@@ -51,7 +51,7 @@ Set the following on the frontend deployment **before its build**:
 NEXT_PUBLIC_ATTESTER_URL=https://attestor.example.com
 ```
 
-Add the same origin (`https://app.example.com`) to `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS` on the attestor. If you use a preview/staging frontend, add each exact origin as a comma-separated entry. Redeploy both services after changing environment settings.
+Add the same origin (`https://app.example.com`) to `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS` on the attestor. If you use a preview/staging frontend, add each origin as a comma-separated entry. You can use `*` instead to allow all origins. Redeploy both services after changing environment settings.
 
 The browser submits the uploaded original `.eml` to:
 
@@ -69,7 +69,7 @@ The service imports the generated pure-circuit module at `contracts/managed/hand
 ## Troubleshooting
 
 - **Health check fails or host says port unavailable:** confirm the service binds `0.0.0.0` and uses the host-injected `PORT`.
-- **Browser CORS error:** add the browser's exact origin to `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS`, then restart/redeploy the attestor.
+- **Browser CORS error:** add the browser's origin to `HANDSHAKE_ATTESTER_ALLOWED_ORIGINS` (or use `*` to allow all origins), then restart/redeploy the attestor.
 - **Attestor URL/network error:** use the deployed HTTPS URL in `NEXT_PUBLIC_ATTESTER_URL`, then rebuild the frontend.
 - **Missing environment or startup error:** check required secret values and ensure `HANDSHAKE_ATTESTER_SECRET_KEY` parses successfully.
 - **DKIM/body hash or signed-header error:** upload the original Gmail downloaded `.eml` unchanged. In Gmail use **Show original → Download original**; do not paste, forward, or edit it. Its passing DKIM signature must cover `From`, `To`, and `Subject`.

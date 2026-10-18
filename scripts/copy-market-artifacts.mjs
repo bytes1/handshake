@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -8,7 +8,12 @@ const destination = path.join(root, 'public', 'market-artifacts');
 
 for (const directory of ['keys', 'zkir']) {
   const from = path.join(source, directory);
-  mkdirSync(path.join(destination, directory), { recursive: true });
-  cpSync(from, path.join(destination, directory), { recursive: true, force: true });
+  const to = path.join(destination, directory);
+  if (existsSync(from)) {
+    mkdirSync(to, { recursive: true });
+    cpSync(from, to, { recursive: true, force: true });
+  } else if (!existsSync(to)) {
+    throw new Error(`Missing marketplace ${directory} artifacts. Compile contracts/handshake-market.compact or restore public/market-artifacts/${directory} before building.`);
+  }
 }
-console.log('Copied Handshake marketplace prover/verifier keys and ZKIR into public/market-artifacts.');
+console.log('Handshake marketplace prover/verifier keys and ZKIR are ready in public/market-artifacts.');

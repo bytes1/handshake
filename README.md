@@ -1,103 +1,129 @@
 # Handshake
 
-A peer-to-peer marketplace frontend and a separate Midnight contract
-workspace. The browser connects to Lace on Midnight Preview by default,
-reads the configured offer from the indexer, and submits buyer reserve, cancel,
-and attested-payment-proof calls through Lace. In the hackathon demo, Gmail SMTP
-sends an explicitly labeled test receipt, and the backend verifies its original
-`.eml` file with Gmail DKIM before issuing the contract attestation. This is not
-a payment and does not contact PayPal.
+**Handshake links an off-chain payment receipt to an on-chain release of escrowed test tokens.** A buyer reserves a seller's Midnight offer, sends a clearly labeled demo receipt, and submits the original email for Gmail DKIM verification. The attester signs the verified claim; the buyer's Lace wallet submits that attestation to the Compact contract, which checks the signature and releases tUSDC.
 
-## Stack
+> **Wave 2 submission snapshot**  
+> Handshake is a testnet prototype. Its demo receipt does not represent a payment, and its custom tUSDC is not Circle USDC and has no redemption value.
 
-- Next.js App Router with TypeScript
-- Tailwind CSS 4
-- shadcn/ui (`base-nova` style)
-- Next.js Route Handlers for backend HTTP endpoints
+## Buildathon Wave 2
 
-## Run locally
+Wave 2 advances Handshake from a buyer-facing offer prototype to an end-to-end Midnight Preview demo. The current build adds concurrent buyer reservations against shared seller liquidity, browser recovery and cancellation for a buyer's reservation, original Gmail `.eml` verification, and an attested Compact settlement that releases test tokens.
+
+This version demonstrates the core settlement path. It still uses one preconfigured maker offer. The app does not yet let a connected wallet create a seller listing. Payment evidence comes from a demo email, so no real fiat transfer occurs.
+
+## What it does
+
+- Reads a deployed offer and live contract state from the Midnight indexer.
+- Connects to Lace on Midnight Preview and lets a buyer reserve an amount from the offer.
+- Sends a conspicuously labeled demo receipt by Gmail SMTP.
+- Verifies the original `.eml` file with Gmail DKIM and checks its signed trade fields in the off-chain attester.
+- Returns a Jubjub Schnorr attestation bound to the contract, buyer commitment, amount, receipt commitment, and replay nullifier.
+- Lets the buyer submit the attestation through Lace. The contract verifies it and transfers the reserved test tUSDC atomically.
+- Supports concurrent buyers, buyer cancellation, saved-intent recovery, and expiry cleanup.
+
+## Privacy and trust model
+
+Handshake keeps the uploaded email and its contents off-chain. The attester receives the original email, verifies its DKIM signature and trade fields, then signs a claim. The Compact contract verifies that signature and binds it to the reserved trade. The contract also records receipt commitments and nullifiers to prevent replay.
+
+This prototype uses selective disclosure for the attestation, but it does **not** hide every trade detail. The buyer's Midnight recipient address, reservation amount, and offer state are public on this demo contract. Gmail DKIM verification and email parsing happen off-chain, so the attester remains trusted to check the email correctly. A signed demo receipt proves only that the demo flow completed; it does not prove that money moved.
+
+## Architecture
+
+| Component | Role |
+| --- | --- |
+| Next.js app | Displays the offer, reads indexed contract state, and coordinates the buyer flow. |
+| Lace wallet | Approves and submits the buyer's Midnight transactions. |
+| Compact marketplace contract | Holds seller-funded test tUSDC, reserves buyer amounts, verifies the attester's Schnorr signature, blocks replay, and pays the buyer. |
+| Demo receipt route | Sends an explicitly labeled test email through Gmail SMTP. |
+| Off-chain attester | Verifies the uploaded original email's Gmail DKIM signature and signed fields, then creates the contract attestation. |
+| Midnight Preview | Runs the deployed contract, indexer, and proof service used by the demo. |
+
+The contract supports one configured maker offer with shared liquidity and concurrent buyer intents. Its maker secret is a bearer authorization for this prototype, not a wallet identity. The app currently implements the buyer journey only.
+
+## Run the Preview demo
+
+### Requirements
+
+- Node.js 22 or newer
+- Lace with the **Preview** network selected
+- A local Midnight proof server reachable at `http://127.0.0.1:6300`, unless Lace supplies another URL
+- A running Handshake attester. See [`midnight-contract/ATTESTOR_DEPLOYMENT.md`](midnight-contract/ATTESTOR_DEPLOYMENT.md) for deployment and secret configuration.
+- Gmail sender credentials and the shared demo-receipt secret configured as described below
+
+### Start the app
+
+From the repository root:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The backend scaffold health check is available at [http://localhost:3000/api/health](http://localhost:3000/api/health).
+Open [http://localhost:3000](http://localhost:3000), select **Preview** in Lace, connect the wallet, and refresh the market. The buyer wallet needs Preview transaction fees. The deployed offer already holds the demo tUSDC inventory.
 
-## Windows development container
+The frontend defaults to the Handshake Preview deployment:
 
-Install and start Docker Desktop with Linux containers enabled, install the VS Code **Dev Containers** extension, open this folder in VS Code, then run **Dev Containers: Reopen in Container**. The container installs Compact 0.31.1 and keeps Linux dependencies in Docker volumes separate from Windows `node_modules`. From the container terminal, run `cd midnight-contract && npm run setup` to compile and start the local Midnight devnet.
+- Marketplace: `5bc81b4a60166225d0063d189190e347f65c567b1f6e9717095bed9acb057894`
+- Demo token: `6feb3cc3d2d9f4d2c9f27332757adb898354b5d3a10376f75d66d299689ec82f`
+- Network: `preview`
 
-## Project layout
+Set `NEXT_PUBLIC_MIDNIGHT_NETWORK` and `NEXT_PUBLIC_MARKET_CONTRACT_ADDRESS` together in `.env.local` to use another deployment. Configure `NEXT_PUBLIC_DEMO_TOKEN_ADDRESS` and `NEXT_PUBLIC_DEMO_TOKEN_DOMAIN_HEX` for that deployment's token as well. The predev and prebuild scripts copy the compiled market proof artifacts into `public/market-artifacts`.
 
-- `src/app/` — routes, layouts, and API route handlers
-- `src/components/ui/` — shadcn/ui components
-- `src/lib/` — shared utilities; keep server-only Midnight integration here
-- `midnight-contract/` — Compact contract, Midnight.js scripts, and local devnet setup
+### Configure the demo receipt
 
-Add UI primitives with `npx shadcn@latest add <component>`.
+Set these values in the repository root `.env.local`:
 
-## Midnight Preview marketplace demo
+```dotenv
+GMAIL_EMAIL=your-sender@gmail.com
+GMAIL_APP_PASSWORD=your-google-app-password
+RESEND_DEMO_RECEIPT_SECRET=the-same-random-secret-as-the-attester
+NEXT_PUBLIC_ATTESTER_URL=https://your-attester.example
+```
 
-The frontend defaults to the Handshake Preview market
-`5bc81b4a60166225d0063d189190e347f65c567b1f6e9717095bed9acb057894` deployed
-by `midnight-contract` setup. Set `NEXT_PUBLIC_MIDNIGHT_NETWORK` and
-`NEXT_PUBLIC_MARKET_CONTRACT_ADDRESS` together in `.env.local` if using a
-different deployment. The `predev` and `prebuild` scripts copy the compiled
-market proving/verifier artifacts into `public/market-artifacts`.
+Enable 2-Step Verification on the Gmail sender account and create a Google App Password. Generate a random secret for `RESEND_DEMO_RECEIPT_SECRET` and configure the same value in `midnight-contract/.env`. Set `HANDSHAKE_DEMO_RECEIPT_FROM` in the attester environment to the same sender address as `GMAIL_EMAIL`.
 
-1. From `midnight-contract`, keep the Preview proof server running. The Preview
-   node and indexer are public endpoints; the proof server used by Lace defaults
-   to `http://127.0.0.1:6300`. If Lace provides a different proof server URL,
-   the connector configuration takes precedence. If the compiled
-   `contracts/managed/handshake-market` folder is absent, run
-   `npm run compile:market` there first (do not redeploy the already deployed
-   market just to generate frontend artifacts).
-2. Install dependencies with `npm install` in the repository root. Install in
-   `midnight-contract` as well if you need its compiler/attester scripts.
-3. Run `npm run dev` from the repository root and open
-   [http://localhost:3000](http://localhost:3000).
-4. In Lace, select **Preview**, ensure it uses the Preview node and indexer,
-   unlock the wallet, then connect from the app. The buyer wallet needs Preview
-   tNIGHT/DUST to pay transaction fees; maker liquidity is already escrowed in
-   the deployed offer.
-5. The displayed offer values come from the Preview contract state. The buy
-   panel also shows the connected Lace account's available unshielded tUSDC
-   balance. Enter a USD amount and reserve; Lace asks you to approve the
-   Midnight transaction.
-6. Configure Gmail as described below, then start the attester in a second
-   terminal from `midnight-contract` with `npm run attester:start`. After
-   reserving, enter a receipt inbox and click **Send demo receipt**. In Gmail,
-   choose **Show original** → **Download original**, upload that `.eml` file,
-   then click **Verify receipt and submit**. Lace submits the resulting
-   contract attestation and releases test tUSDC to the connected wallet.
+Start the attester from `midnight-contract`:
 
-### Demo email and Gmail DKIM setup
+```bash
+npm install
+npm run attester:start
+```
 
-1. Enable 2-Step Verification for your Google Account and create an App
-   Password. Copy your Gmail address and App Password into the repository root
-   `.env.local` as `GMAIL_EMAIL` and `GMAIL_APP_PASSWORD`.
-2. Generate one random secret (for example,
-   `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`).
-   Set it as `RESEND_DEMO_RECEIPT_SECRET` in both the root `.env.local` and
-   `midnight-contract/.env`. The app and attester use it to check that the
-   receipt claims were issued by this demo.
-3. Set `HANDSHAKE_DEMO_RECEIPT_FROM` in `midnight-contract/.env` to the same
-   sender address as `GMAIL_EMAIL` in the root `.env.local`. The uploaded-email
-   path verifies Gmail DKIM, then checks the signed sender, recipient, subject,
-   receipt token, and trade fields before attesting.
-4. Install dependencies in both the repository root and `midnight-contract`,
-   then run the root app and `npm run attester:start` in the contract folder.
+### Buyer walkthrough
 
-The email is conspicuously marked **DEMO RECEIPT — NO PAYMENT WAS MADE**. It is
-not generated by PayPal, does not prove that funds moved, and must not be
-presented as a real payment confirmation. Gmail DKIM and backend claim checks
-verify the signed sender, recipient, subject, receipt token, and trade fields.
-They do not turn the demo receipt into a real fiat payment, and uploading a
-message does not prove who uploaded it or inbox access. The existing contract
-already verifies the attester signature and binds it to the buyer reservation,
-so no contract change or redeployment is needed.
+1. Connect Lace on Preview and enter an amount within the offer limits.
+2. Review the quote and approve the reservation transaction in Lace.
+3. Enter a recipient inbox and send the demo receipt.
+4. In Gmail, open **Show original** and download the unchanged `.eml` file.
+5. Upload that file and submit the verified proof through Lace.
 
-The buyer recovery secret is saved in this browser so a pending reservation
-can be resumed or cancelled across refreshes. The old PayPal Sandbox API routes
-remain in the codebase but are not part of this trade path.
+The demo email says **DEMO RECEIPT — NO PAYMENT WAS MADE**. Do not present it as a PayPal receipt or as evidence of a real payment.
+
+## Contract development
+
+The Compact contract and deployment scripts live in [`midnight-contract/`](midnight-contract/README.md). The current `.compact-version` pins the compiler used for this workspace. On Windows, run the Compact compiler from WSL because the compiler does not publish a native Windows binary.
+
+```bash
+cd midnight-contract
+npm install
+npm run compile:all
+```
+
+The contract's local smoke flows are documented in the contract README. Deployment scripts can create a local or testnet token and offer; they use test assets only. Do not use the local development seed for public networks or real value.
+
+## Wave 3 direction
+
+- Let a connected seller create, fund, manage, and withdraw their own offer.
+- Replace the demo email receipt with payment-provider-backed evidence and a documented attester trust model.
+- Reduce public trade metadata where the Midnight contract model allows it.
+- Expand contract simulation and failure-case coverage before any production use.
+
+## Buildathon submission checklist
+
+- Public repository: [github.com/bytes1/handshake](https://github.com/bytes1/handshake)
+- Pitch deck: [`pitch/Handshake-Wave-2-Pitch.pptx`](pitch/Handshake-Wave-2-Pitch.pptx)
+- Add the `midnightntwrk` topic to the GitHub repository.
+- Include the demo video or video pitch and a short Wave 2 progress description in the AKINDO submission.
+- The Buildathon brief requires newly developed Midnight-related code, including the Compact contract, to be publicly available under Apache 2.0. Confirm the repository licensing and team registration meet the Official Rules before submitting.
+
+The Buildathon brief says its Official Rules govern if a summary conflicts with them. Confirm the final submission details and deadline on AKINDO.
