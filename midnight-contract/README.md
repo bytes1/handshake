@@ -23,7 +23,7 @@
 ---
 
 > [!IMPORTANT]
-> **Prototype & Testnet Scope**
+> **Testnet & Demo Scope**
 > - **Testnet Assets Only:** Mints and settles **Handshake test tUSDC** (6 decimals). This is a custom test token on Midnight Preview with zero fiat redemption value; it is **not** Circle USDC.
 > - **Attester Trust Boundary:** DKIM signature validation and receipt parsing execute off-chain in the attester service. The on-chain Compact circuit verifies the attester's Jubjub Schnorr signature against trade commitments and consumes double nullifiers to prevent replay.
 
@@ -41,7 +41,7 @@
 - [Quick Start: Local Devnet](#quick-start-local-devnet)
   - [Prerequisites](#prerequisites)
   - [Automated Setup](#automated-setup)
-- [Testing & Quality Checks (Smoke Tests)](#testing--quality-checks-smoke-tests)
+- [Testing & Quality Checks](#testing--quality-checks)
 - [Multi-Network Support](#multi-network-support)
   - [Supported Networks](#supported-networks)
   - [Deploying to Midnight Preview](#deploying-to-midnight-preview)
@@ -206,11 +206,36 @@ docker compose down -v
 
 ---
 
-## Testing & Quality Checks (Smoke Tests)
+## Testing & Quality Checks
 
-The repository provides comprehensive contract smoke tests targeting the local devnet:
+### Offline Contract Tests
 
-### 1. Reservation & Cancellation Flow
+Run the contract unit tests from this `midnight-contract` directory:
+
+```bash
+npm test
+```
+
+You can also run them from the repository root with:
+
+```bash
+npm --prefix midnight-contract test
+```
+
+These tests use Node.js's built-in test runner and the compiled Compact contract artifacts. They do not require Docker, a running devnet, or the attester service. They cover demo-token initialization and mint restrictions, market constructor validation and initial state, rejection of reservations before the offer is funded, and payment-attestation transcript binding. If you change a `.compact` contract, recompile the contracts before running the tests:
+
+```bash
+npm run compile:all
+npm test
+```
+
+On Windows, the Compact compiler may need to run in WSL or Docker; the tests themselves can run from PowerShell with Node.js 22 or newer.
+
+### Devnet Smoke Tests
+
+The repository also provides smoke tests for contract flows against a running local devnet:
+
+#### Reservation & Cancellation Flow
 Tests `reserveIntent` and `cancelIntent` against live ledger state:
 
 ```bash
@@ -220,7 +245,7 @@ npm run market:smoke -- --network undeployed
 - Verifies that available liquidity decrements correctly.
 - Cancels the intent and confirms that liquidity returns to the open pool.
 
-### 2. End-to-End Payment Proof Flow
+#### End-to-End Payment Proof Flow
 Tests the full cryptographic attestation and settlement pipeline:
 
 ```bash
@@ -319,6 +344,7 @@ Configure variables in `midnight-contract/.env`:
 | `npm run compile:all` | `compile:demo-token && compile:market` | Compiles both Compact contracts |
 | `npm run compile:market` | `compact compile contracts/handshake-market.compact` | Compiles the marketplace contract |
 | `npm run compile:demo-token` | `compact compile contracts/handshake-demo-usdc.compact` | Compiles the test tUSDC contract |
+| `npm test` | `node --test` | Runs offline unit tests for the compiled contracts |
 | `npm run deploy` | `tsx src/deploy.ts` | Deploys contracts to the currently active network |
 | `npm run attester:start` | `tsx src/attester-server.ts` | Starts the HTTP DKIM / Jubjub attester service |
 | `npm run attester:keygen` | `tsx src/attester-keygen.ts` | Generates a new Jubjub key pair for the attester |

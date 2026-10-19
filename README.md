@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  A privacy-preserving peer-to-peer settlement prototype on the <a href="https://midnight.network">Midnight Network</a>.<br />
+  A privacy-preserving peer-to-peer settlement platform on the <a href="https://midnight.network">Midnight Network</a>.<br />
   Verifies real-world off-chain payment receipts and releases on-chain escrow without exposing private receipt data on a public ledger.
 </p>
 
