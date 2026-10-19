@@ -10,6 +10,7 @@
     "compile:market": "compact compile contracts/handshake-market.compact contracts/managed/handshake-market",
     "compile:demo-token": "compact compile contracts/handshake-demo-usdc.compact contracts/managed/handshake-demo-usdc",
     "compile:all": "npm run compile:demo-token && npm run compile:market",
+    "test": "node --test",
     "build": "npx tsc --noEmit || true",
     "setup": "npx tsx src/setup.ts",
     "attester:keygen": "npx tsx src/attester-keygen.ts",
